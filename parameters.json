@@ -1,0 +1,39 @@
+{
+
+    "general": {
+        "isDebug": true,
+        "isAudio": true,
+        "outputAudioPath": "output_audio/output.wav",
+        "isBenchmarking": true,
+        "isLog": false
+    },
+
+    "audio": {
+        "sampleRate": 44100,
+        "audioLengthLog2": 10,
+        "wavetableSize": 32768
+    },
+
+    "evolutionary": {
+        "numParents": 192,
+        "numOffspring": 1344,
+        "numDimensions": 4,
+        "paramMins": [0.0, 0.0, 0.0, 0.0],
+        "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
+        "fitnessThreshold": 0.00001,
+        "numGenerations": 50
+    },
+
+    "type": {
+        "implementation": "OpenCL",
+        "OpenCL": {
+            "workgroupSize": 32
+        },
+        "Vulkan": {
+			"workgroupSize": 32
+        },
+        "input": "params",
+        "params": [1450.0, 3.0, 200.0, 1.0],
+        "audio": "input_audio/input.wav"
+    }
+}

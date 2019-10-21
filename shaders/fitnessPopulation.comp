@@ -1,0 +1,170 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(binding = 0) buffer inputPopulationValueBuffer
+{
+   float inputPopulationValuePayload[];
+};
+layout(binding = 1) buffer inputPopulationStepBuffer
+{
+   float inputPopulationStepPayload[];
+};
+layout(binding = 2) buffer inputPopulationFitnessBuffer
+{
+   float inputPopulationFitnessPayload[];
+};
+
+layout(binding = 3) buffer outputPopulationValueBuffer
+{
+   float outputPopulationValuePayload[];
+};
+layout(binding = 4) buffer outputPopulationStepBuffer
+{
+   float outputPopulationStepPayload[];
+};
+layout(binding = 5) buffer outputPopulationFitnessBuffer
+{
+   float outputPopulationFitnessPayload[];
+};
+
+layout(binding = 6) buffer randomStatesBuffer
+{
+   vec2 randomStatesPayload[];
+};
+
+layout(binding = 7) buffer paramMinBuffer
+{
+   float paramMinPayload[];
+};
+layout(binding = 8) buffer paramMaxBuffer
+{
+   float paramMaxPayload[];
+};
+
+layout(binding = 9) buffer outputAudioBuffer
+{
+   float outputAudioPayload[];
+};
+
+layout(binding = 10) buffer inputFFTDataBuffer
+{
+   float inputFFTDataPayload[];
+};
+layout(binding = 11) buffer inputFFTTargetBuffer
+{
+   float inputFFTTargetPayload[];
+};
+layout(binding = 12) buffer rotationIndexBuffer
+{
+   uint rotationIndexPayload;
+};
+layout( push_constant ) uniform index{uint rotationIndex;} RotationIndex;
+
+layout (constant_id = 1) const uint WORKGROUP_X = 32;
+layout (constant_id = 2) const uint WORKGROUP_Y = 1;
+layout (constant_id = 3) const uint WORKGROUP_Z = 1;
+layout (constant_id = 4) const uint WRKGRPSIZE = WORKGROUP_X * WORKGROUP_Y;
+layout (constant_id = 5) const uint NUM_DIMENSIONS = 4;
+
+layout(constant_id = 6) const uint POPULATION_COUNT = 1536;
+layout(constant_id = 7) const uint NUM_WGS_FOR_PARENTS = 192 / WRKGRPSIZE; //Need to work out? In GPU_Match CPU code??
+layout(constant_id = 8) const uint CHUNK_SIZE_FITNESS = (WRKGRPSIZE / 2);
+layout(constant_id = 9) const uint AUDIO_WAVE_FORM_SIZE = 1024;
+
+layout(constant_id = 10) const uint FFT_OUT_SIZE = 1023;
+layout(constant_id = 11) const uint FFT_HALF_SIZE = 512;
+layout(constant_id = 12) const float FFT_ONE_OVER_SIZE = 1 / 1023;
+layout(constant_id = 13) const float FFT_ONE_OVER_WINDOW_FACTOR = 1.0;
+
+layout(constant_id = 14) const float M_PI = 3.14159265358979323846;
+layout(constant_id = 15) const float ALPHA = 1.4;
+layout(constant_id = 16) const float ONE_OVER_ALPHA = 1 / 1.4;
+layout(constant_id = 17) const float ROOT_TWO_OVER_PI = 0.797884561;
+layout(constant_id = 18) const float BETA_SCALE = 0.25;
+layout(constant_id = 19) const float BETA = 0.5;
+
+/* We synthesise the wave in chunks. The size of the chunks is defined here in
+ * terms of the work group size. The synthesis is done in chunks to avoid local
+ * memory getting to big. This should really be tuned based on the hardware. */
+layout (constant_id = 20) const uint CHUNKS_PER_WG_SYNTH = 1;
+layout (constant_id = 21) const uint CHUNK_SIZE_SYNTH = WRKGRPSIZE/CHUNKS_PER_WG_SYNTH;
+/* Constant used for FM synthesis */
+layout (constant_id = 22) const float ONE_OVER_SAMPLE_RATE_TIMES_2_PI = 0.00014247573;
+
+//Population size to index into flat array//
+layout(constant_id = 23) const uint POPULATION_SIZE = 1536 * (4);
+
+layout (local_size_x_id = 1, local_size_y_id = 2) in;
+
+shared float group_fft[WRKGRPSIZE * CHUNK_SIZE_FITNESS];
+shared float group_fft_target[CHUNK_SIZE_FITNESS];
+
+float hypot (vec2 z) {
+  float t;
+  float x = abs(z.x);
+  float y = abs(z.y);
+  t = min(x, y);
+  x = max(x, y);
+  t = t / x;
+  return (z.x == 0.0 && z.y == 0.0) ? 0.0 : x * sqrt(1.0 + t * t);
+}
+
+/*------------------------------------------------------------------------------
+    Calculate Fitness
+------------------------------------------------------------------------------*/
+void main()
+{
+    //Set all work item IDs//
+    uint gid = gl_GlobalInvocationID.x;
+    uint tid = gl_LocalInvocationID.x;
+    uint wid = gl_WorkGroupID.x;
+
+    uint populationStartIndex = rotationIndexPayload * POPULATION_SIZE;
+    uint populationFitnessStartIndex = rotationIndexPayload * (POPULATION_SIZE/4);
+
+    float error = 0.0f;
+    float tmp;
+    int second_half_local_target;
+
+    for(int j = 0; j < FFT_HALF_SIZE / CHUNK_SIZE_FITNESS; j++)
+    {
+        // Read in chunks - each iteration of the loop every thread reads one chunk for one thread
+        for(int i = 0; i < WRKGRPSIZE/2; i++)
+        {
+            if(tid < CHUNK_SIZE_FITNESS)
+            {
+                group_fft[CHUNK_SIZE_FITNESS * i*2 + tid] = inputFFTDataPayload[( FFT_OUT_SIZE*
+                        (WRKGRPSIZE * wid + i*2)) + (CHUNK_SIZE_FITNESS * j) + tid];
+            }
+            else
+            {
+                group_fft[CHUNK_SIZE_FITNESS * (i*2 + 1) + (tid - CHUNK_SIZE_FITNESS)] =
+                    inputFFTDataPayload[( FFT_OUT_SIZE* (WRKGRPSIZE * wid + (i*2+1))) + (CHUNK_SIZE_FITNESS * j) +
+                                (tid - CHUNK_SIZE_FITNESS)];
+            }
+
+        }
+        // now load the target into local memory - this is not complex data so our threads load double the necessary amount.
+        // this means we only need to load every other iteration.
+        second_half_local_target = int((j % 2 == 1));
+        if(!bool(second_half_local_target))
+        {
+            if(tid < CHUNK_SIZE_FITNESS)
+            {
+                group_fft_target[tid] = inputFFTTargetPayload[j * (CHUNK_SIZE_FITNESS/2) + tid];
+            }
+        }
+        for(int i = 0; i < CHUNK_SIZE_FITNESS; i+=2)
+        {
+            //const float raw_magnitude = sqrt(pow(group_fft[CHUNK_SIZE_FITNESS * tid + i],2) +
+            //                                   pow(group_fft[CHUNK_SIZE_FITNESS * tid + i + 1],2)); //@Highlight - Previously, this used OpenCL's hypot function. This is sqrt(x^2 + y^2) that avoids over&under-flow. Need to check this is okay to use or should use safe hypot function somehow.
+            vec2 inputHypot = vec2(group_fft[CHUNK_SIZE_FITNESS * tid + i], group_fft[CHUNK_SIZE_FITNESS * tid + i + 1]);
+            const float raw_magnitude = hypot(inputHypot);
+            const float magnitude_for_fft_size = raw_magnitude * FFT_ONE_OVER_SIZE;
+            tmp = (magnitude_for_fft_size * FFT_ONE_OVER_WINDOW_FACTOR) -
+                  group_fft_target[second_half_local_target * CHUNK_SIZE_FITNESS / 2 + i/2];
+            error += tmp * tmp;
+        }
+    }
+    inputPopulationFitnessPayload[populationFitnessStartIndex + gid] = error;
+}
