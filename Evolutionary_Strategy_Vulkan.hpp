@@ -318,7 +318,7 @@ private:
 			//	VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
 			//else
 			//	VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
-			VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i])
+			VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
 		}
 
 		//VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
