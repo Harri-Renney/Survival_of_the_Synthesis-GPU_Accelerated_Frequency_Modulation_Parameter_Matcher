@@ -1,7 +1,7 @@
 #ifndef EVOLUTIONARY_STRATEGY_OPENCL_HPP
 #define EVOLUTIONARY_STRATEGY_OPENCL_HPP
 
-#define CL_HPP_TARGET_OPENCL_VERSION 200
+#define CL_HPP_TARGET_OPENCL_VERSION 210
 #define CL_HPP_MINIMUM_OPENCL_VERSION 200
 #include <CL/cl2.hpp>
 //#include <CL/cl.hpp>
@@ -16,6 +16,8 @@
 
 #include "Evolutionary_Strategy.hpp"
 
+enum DeviceType { INTEGRATED, DISCRETE };
+
 struct Evolutionary_Strategy_OpenCL_Arguments
 {
 	//Generic Evolutionary Strategy arguments//
@@ -27,6 +29,8 @@ struct Evolutionary_Strategy_OpenCL_Arguments
 	uint32_t workgroupZ = 1;
 	uint32_t workgroupSize = workgroupX * workgroupY * workgroupZ;
 	std::string kernelSourcePath;
+
+	DeviceType deviceType;
 };
 
 class Evolutionary_Strategy_OpenCL : public Evolutionary_Strategy
@@ -49,8 +53,8 @@ private:
 	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
 
 	//Buffers//
-	static const uint8_t numBuffers_ = 13;
-	enum storageBufferNames_ { inputPopulationValueBuffer = 0, inputPopulationStepBuffer, inputPopulationFitnessBuffer, outputPopulationValueBuffer, outputPopulationStepBuffer, outputPopulationFitnessBuffer, randomStatesBuffer, paramMinBuffer, paramMaxBuffer, outputAudioBuffer, inputFFTDataBuffer, inputFFTTargetBuffer, rotationIndexBuffer};
+	static const uint8_t numBuffers_ = 14;
+	enum storageBufferNames_ { inputPopulationValueBuffer = 0, inputPopulationStepBuffer, inputPopulationFitnessBuffer, outputPopulationValueBuffer, outputPopulationStepBuffer, outputPopulationFitnessBuffer, randomStatesBuffer, paramMinBuffer, paramMaxBuffer, outputAudioBuffer, inputFFTDataBuffer, inputFFTTargetBuffer, rotationIndexBuffer, wavetableBuffer};
 	std::array<cl::Buffer, numBuffers_> storageBuffers_;
 	std::array<uint32_t, numBuffers_> storageBufferSizes_;
 
@@ -73,6 +77,8 @@ private:
 
 	uint32_t rotationIndex_;
 
+	DeviceType deviceType_;
+
 	const std::string compilerArguments_ =
 		"-cl-fast-relaxed-math "
 		"-D WRKGRPSIZE=%d "
@@ -90,7 +96,7 @@ private:
 		"-D FFT_ONE_OVER_WINDOW_FACTOR=%f "
 		"-D FFT_OUT_SIZE=%d "
 		"-D FFT_HALF_SIZE=%d "
-		"-D WAVE_TABLE_SIZE=%d";
+		"-D WAVETABLE_SIZE=%d";
 public:
 	Evolutionary_Strategy_OpenCL(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, std::string aKernelSourcePath, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
@@ -114,7 +120,8 @@ public:
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
 		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" }),
-		globalSize_(population.populationSize)
+		globalSize_(population.populationSize),
+		deviceType_(args.deviceType)
 	{
 		init();
 	}
@@ -184,7 +191,12 @@ public:
 		cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platforms[aPlatform])(), 0 };	//Need to specify platform 3 for dedicated graphics - Harri Laptop.
 
 		//Create context context using platform for GPU device//
-		context_ = cl::Context(CL_DEVICE_TYPE_ALL, contextProperties);
+		if (deviceType_ == DeviceType::INTEGRATED)
+			context_ = cl::Context(CL_DEVICE_TYPE_CPU, contextProperties);
+		if(deviceType_ == DeviceType::DISCRETE)
+			context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
+		else
+			context_ = cl::Context(CL_DEVICE_TYPE_ALL, contextProperties);
 
 		//Get device list from context//
 		std::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
@@ -259,6 +271,7 @@ public:
 		storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
 		storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
 		storageBufferSizes_[rotationIndexBuffer] = sizeof(uint32_t);
+		storageBufferSizes_[wavetableBuffer] = objective.wavetableSize * sizeof(float);
 	}
 	void initBuffersCL()
 	{
@@ -284,6 +297,7 @@ public:
 		//Write intial data to buffers @ToDO - Do elsewhere//
 		commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMinBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMins.data());
 		commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMaxBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMaxs.data());
+		commandQueue_.enqueueWriteBuffer(storageBuffers_[wavetableBuffer], CL_TRUE, 0, objective.wavetableSize * sizeof(float), objective.wavetable);
 	}
 	void initKernelArgumentsCL()
 	{
@@ -311,6 +325,7 @@ public:
 		kernels_[synthesisePopulation].setArg(2, sizeof(cl_mem), &(storageBuffers_[paramMinBuffer]));
 		kernels_[synthesisePopulation].setArg(3, sizeof(cl_mem), &(storageBuffers_[paramMaxBuffer]));
 		kernels_[synthesisePopulation].setArg(4, sizeof(cl_mem), &(storageBuffers_[rotationIndexBuffer]));
+		kernels_[synthesisePopulation].setArg(5, sizeof(cl_mem), &(storageBuffers_[wavetableBuffer]));
 
 		//Set applyWindowPopulation kernel arguments//
 		kernels_[applyWindowPopulation].setArg(0, sizeof(cl_mem), &(storageBuffers_[outputAudioBuffer]));
@@ -344,6 +359,7 @@ public:
 	{
 		rotationIndex_ = 0;
 		commandQueue_.enqueueWriteBuffer(storageBuffers_[rotationIndexBuffer], CL_TRUE, 0, sizeof(uint32_t), &rotationIndex_);
+		commandQueue_.finish();
 
 		//Run initialise population kernel//
 		commandQueue_.enqueueNDRangeKernel(kernels_[initPopulation], cl::NullRange, globalSize_, workgroupSize, NULL);
@@ -369,6 +385,7 @@ public:
 		//Write random states to GPU randomStatesBuffer//
 		uint32_t cpySize = numRandomStates * sizeof(glm::uvec2);
 		commandQueue_.enqueueWriteBuffer(storageBuffers_[randomStatesBuffer], CL_TRUE, 0, cpySize, rand_state);
+		commandQueue_.finish();
 
 		delete(rand_state);
 	}
@@ -450,7 +467,7 @@ public:
 				auto diff = end - start;
 				kernelExecuteTime_[idx] += diff;
 			}
-			//if (idx == copyPopulation)
+			//else if (idx == copyPopulation)
 			//{
 			//	std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 			//
@@ -468,6 +485,7 @@ public:
 				std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
 				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, globalSize_, workgroupSize, NULL);
+				//clFinish(commandQueue_());
 				commandQueue_.finish();
 
 				auto end = std::chrono::steady_clock::now();
@@ -503,6 +521,7 @@ public:
 		targetAudioLength = aTargetAudioLength;
 		objective.calculateFFT(aTargetAudio, targetFFT_);
 		commandQueue_.enqueueWriteBuffer(storageBuffers_[inputFFTTargetBuffer], CL_TRUE, 0, objective.fftHalfSize*sizeof(float), targetFFT_);
+		commandQueue_.finish();
 	}
 
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -534,6 +553,54 @@ public:
 		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3]);
 
 		delete(tempData);
+	}
+
+	//Static Functions//
+	static void printAvailableDevices()
+	{
+		cl::vector<cl::Platform> platforms;
+		cl::Platform::get(&platforms);
+
+		//Print all available devices//
+		int platform_id = 0;
+		std::cout << "Number of Platforms: " << platforms.size() << std::endl << std::endl;
+		for (cl::vector<cl::Platform>::iterator it = platforms.begin(); it != platforms.end(); ++it)
+		{
+			cl::Platform platform(*it);
+
+			std::cout << "Platform ID: " << platform_id++ << std::endl;
+			std::cout << "Platform Name: " << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
+			std::cout << "Platform Vendor: " << platform.getInfo<CL_PLATFORM_VENDOR>() << std::endl;
+
+			cl::vector<cl::Device> devices;
+			platform.getDevices(CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_CPU, &devices);
+
+			int device_id = 0;
+			for (cl::vector<cl::Device>::iterator it2 = devices.begin(); it2 != devices.end(); ++it2)
+			{
+				cl::Device device(*it2);
+
+				std::cout << "\tDevice " << device_id++ << ": " << std::endl;
+				std::cout << "\t\tDevice Name: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
+				std::cout << "\t\tDevice Type: " << device.getInfo<CL_DEVICE_TYPE>();
+				std::cout << " (GPU: " << CL_DEVICE_TYPE_GPU << ", CPU: " << CL_DEVICE_TYPE_CPU << ")" << std::endl;
+				std::cout << "\t\tDevice Vendor: " << device.getInfo<CL_DEVICE_VENDOR>() << std::endl;
+				std::cout << "\t\tDevice Max Compute Units: " << device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
+				std::cout << "\t\tDevice Global Memory: " << device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>() << std::endl;
+				std::cout << "\t\tDevice Max Clock Frequency: " << device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>() << std::endl;
+				std::cout << "\t\tDevice Max Allocateable Memory: " << device.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>() << std::endl;
+				std::cout << "\t\tDevice Local Memory: " << device.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>() << std::endl;
+				std::cout << "\t\tDevice Available: " << device.getInfo< CL_DEVICE_AVAILABLE>() << std::endl;
+
+				//If an AMD platform//
+				if (strstr(platform.getInfo<CL_PLATFORM_NAME>().c_str(), "AMD"))
+				{
+					std::cout << "\tAMD Specific:" << std::endl;
+					std::cout << "\t\tAMD Wavefront size: " << device.getInfo<CL_DEVICE_WAVEFRONT_WIDTH_AMD>() << std::endl;
+				}
+			}
+			std::cout << std::endl;
+		}
 	}
 };
 

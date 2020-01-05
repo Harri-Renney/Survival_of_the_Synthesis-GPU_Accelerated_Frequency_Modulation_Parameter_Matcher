@@ -22,6 +22,133 @@ struct Population
 	uint32_t populationSize = numParents + numOffspring;
 
 	float *data;
+
+	float* getValue(uint32_t idxIndividual, uint32_t idxValue)
+	{
+		uint32_t idx = ((idxIndividual * (numDimensions*2 + 1))) + (idxValue * 2);
+		return &(data[idx]);
+	}
+	float* getStep(uint32_t idxIndividual, uint32_t idxStep)
+	{
+		uint32_t idx = (idxIndividual * (numDimensions*2 + 1)) + ((idxStep * 2) + 1);
+		return &(data[idx]);
+	}
+	float* getFitness(uint32_t idxIndividual)
+	{
+		uint32_t idx = ((idxIndividual * (numDimensions*2 + 1))) + (numDimensions * 2);
+		return &(data[idx]);
+	}
+	
+	void swap(int32_t first, int32_t second)
+	{
+		int32_t individualLength = (numDimensions * 2 + 1);
+		int32_t idxF = first * individualLength;
+		int32_t idxS = second * individualLength;
+		for (uint32_t i = 0; i != individualLength; ++i)
+		{
+			float temp = data[idxS + i];
+			data[idxS + i] = data[idxF + i];
+			data[idxF + i] = temp;
+		}
+	}
+
+	//Sorting//
+	//int32_t partition(int32_t low, int32_t high)
+	//{
+	//	// pivot (Element to be placed at right position)
+	//	float pivot = *getFitness(high);
+	//
+	//	int32_t i = (low - 1 < 0 ? 0 : low - 1);  // Index of smaller element
+	//
+	//	for (uint32_t j = low; j <= high - 1; j++)
+	//	{
+	//		// If current element is smaller than the pivot
+	//		if (*getFitness(j) < pivot)
+	//		{
+	//			i++;    // increment index of smaller element
+	//			swap(i, j);
+	//		}
+	//	}
+	//	swap(i + 1 > populationSize - 1 ? populationSize - 1 : i + 1, high);
+	//	return (i + 1 > populationSize - 1 ? populationSize - 1 : i + 1);
+	//}
+	//
+	//void quickSortPopulation()
+	//{
+	//	int32_t low = 0;
+	//	int32_t high = populationSize-1;
+	//	if (low < high)
+	//	{
+	//		/* pi is partitioning index, arr[pi] is now
+	//		   at right place */
+	//		int32_t pi = partition(low, high);
+	//
+	//		int temp = (((int)pi - 1) < 0) ? 0 : pi - 1;
+	//		quickSortPopulation(low, temp);  // Before pi
+	//		quickSortPopulation(pi + 1 > populationSize-1 ? populationSize - 1 : pi + 1, high); // After pi
+	//	}
+	//}
+	//void quickSortPopulation(int32_t low, int32_t high)
+	//{
+	//	if (low < high)
+	//	{
+	//		/* pi is partitioning index, arr[pi] is now
+	//		   at right place */
+	//		int32_t pi = partition(low, high);
+	//
+	//		int temp = (((int)pi - 1) < 0) ? 0 : pi - 1;
+	//		quickSortPopulation(low, temp);  // Before pi
+	//		quickSortPopulation(pi + 1 > populationSize - 1 ? populationSize - 1 : pi + 1, high); // After pi
+	//	}
+	//}
+
+	void quickSortPopulation(int left, int right) {
+
+		int i = left, j = right;
+
+		float tmp;
+
+		float pivot = *getFitness((left+right)/2);
+
+
+
+		/* partition */
+
+		while (i <= j) {
+
+			while (*getFitness(i) < pivot)
+
+				i++;
+
+			while (*getFitness(j) > pivot)
+
+				j--;
+
+			if (i <= j) {
+
+				swap(i, j);
+
+				i++;
+
+				j--;
+
+			}
+
+		};
+
+
+
+		/* recursion */
+
+		if (left < j)
+
+			quickSortPopulation(left, j);
+
+		if (i < right)
+
+			quickSortPopulation(i, right);
+
+	}
 };
 
 class Objective
@@ -118,6 +245,8 @@ public:
 		fftWindowedAudio = new double [fftSize];
 
 		initFFTW(aPopulationSize);
+
+		initWavetable();
 	}
 	void initMemory()
 	{
@@ -211,10 +340,6 @@ public:
 		squareErrorDenominator = 1.f / squareErrorDenominator.real();	//@ToDo - What does this actually do though? Not ever used? And no side effects...
 	}
 
-	void calculateAudio()
-	{
-
-	}
 	//@ToDo - This is done in chunks. Therefore, need to comeback and realise way to do this.
 	//@ToDo - Scale Params?
 	void synthesiseAudio(const std::vector<float> aParams, float* aAudioBuffer)
@@ -375,6 +500,10 @@ public:
 
 	}
 	virtual void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
+	{
+
+	}
+	virtual void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
 	{
 
 	}
