@@ -107,7 +107,7 @@ private:
 	VkDevice logicalDevice_;
 
 	//Compute Queue//
-	VkQueue computeQueue_; // a queue supporting compute operations.
+	VkQueue computeQueue_;		//A queue supporting compute operations.
 	uint32_t queueFamilyIndex_;
 
 	//Pipeline//
@@ -156,6 +156,17 @@ private:
 	std::array<VkBuffer, numBuffers_> storageBuffers_;
 	std::array<VkDeviceMemory, numBuffers_> storageBuffersMemory_;
 	std::array<uint32_t, numBuffers_> storageBufferSizes_;
+
+	//Staging Buffer//
+	VkQueue bufferQueue;		//A queue for supporting memory buffer operations.
+	VkCommandPool commandPoolStaging_;
+	uint32_t stagingBufferSize_;
+	VkBuffer stagingBuffer_;
+	VkDeviceMemory stagingBufferMemory_;
+	//Local Buffer//
+	uint32_t localBufferSize_;
+	VkBuffer localBuffer_;
+	VkDeviceMemory localBufferMemory_;
 
 	//Validation & Debug Variables//
 	VkDebugReportCallbackEXT debugReportCallback_;
@@ -298,12 +309,27 @@ private:
 
 		specializationData.populationSize = population.populationSize * population.numDimensions;
 	}
+	//@ToDo - Use local memory buffers correctly//
 	void initBuffersVK()
 	{
 		for (uint32_t i = 0; i != numBuffers_; ++i)
 		{
-			VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
+			//if(numBuffers_ < outputPopulationFitnessBuffer)
+			//	VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
+			//else
+			//	VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
+			VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i])
 		}
+
+		//VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
+		//Create Staging Buffer//
+		stagingBufferSize_ = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float) * 2;
+		localBufferSize_ = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float) * 2;
+
+		//VKHelper::createBuffer(physicalDevice_, logicalDevice_, stagingBufferSize_, VK_BUFFER_USAGE_TRANSFER_DST_BIT //| VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+		//	, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer_, stagingBufferMemory_);
+		//VKHelper::createBuffer(physicalDevice_, logicalDevice_, localBufferSize_, VK_BUFFER_USAGE_TRANSFER_DST_BIT //| VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+		//	,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, localBuffer_, localBufferMemory_);
 	}
 	void initRandomStateBuffer()
 	{
@@ -326,6 +352,8 @@ private:
 		vkMapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer], 0, cpySize, 0, &data);
 			memcpy(data, rand_state, static_cast<size_t>(cpySize));
 		vkUnmapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer]);
+
+		//@ToDo - Write into buffer?//
 	}
 
 	void createInstance()
@@ -424,6 +452,7 @@ private:
 
 	}
 
+	//@ToDo - Correctly find the AMD GPU, not use intel one.//
 	void findPhysicalDevice()
 	{
 		/*
@@ -464,10 +493,23 @@ private:
 		device in the list. But in a real and serious application, those limitations should certainly be taken into account.
 
 		*/
+		//physicalDevice_ = devices[1];
+		//return;
 		for (VkPhysicalDevice device : devices) {
 			if (true) { // As above stated, we do no feature checks, so just accept.
-				physicalDevice_ = device;
-				break;
+				VkPhysicalDeviceProperties deviceProperties;
+				VkPhysicalDeviceFeatures deviceFeatures;
+				vkGetPhysicalDeviceProperties(device, &deviceProperties);
+				vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+				printf("Device found: %s\n", deviceProperties.deviceName);
+				printf("Device maxDescriptorSetStorageBuffers: %d\n", deviceProperties.limits.maxDescriptorSetStorageBuffers);
+				//printf("Device features: %s\n", deviceFeatures.);
+		
+				if(deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+				{
+					physicalDevice_ = device;
+					break;
+				}
 			}
 		}
 	}
@@ -806,6 +848,16 @@ private:
 
 			std::cout << "Created shader: " << fileName.c_str() << std::endl;
 		}
+	}
+	void createCopyCommandPool()
+	{
+		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
+		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		commandPoolCreateInfo.flags = 0;
+		// the queue family of this command pool. All command buffers allocated from this command pool,
+		// must be submitted to queues of this family ONLY. 
+		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
+		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolStaging_));
 	}
 	void createPopulationInitialiseCommandBuffer()
 	{
@@ -1154,8 +1206,9 @@ public:
 		rotationIndex_ = new uint32_t;
 		*rotationIndex_ = 0;
 
-		initContextCL(0, 0);
+		initContextCL(1, 0);
 		initBuffersCL();
+		initCLFFT();
 
 		populationAudioDate = new float[population.populationSize * objective.audioLength];
 		populationFFTData = new float[population.populationSize * objective.fftOutSize];
@@ -1168,15 +1221,58 @@ public:
 		createDescriptorSet();
 		initConstantsVK();
 		createComputePipelines();
+		createCopyCommandPool();
 		createPopulationInitialiseCommandBuffer();
 		createESCommandBufferOne();
 		createESCommandBufferTwo();
 		initRandomStateBuffer();
 		writeParamData((void*)objective.paramMins.data(), (void*)objective.paramMaxs.data());
 	}
+	void initCLFFT()
+	{
+		//clFFT Variables//
+		clfftDim dim = CLFFT_1D;
+		size_t clLengths[1] = { objective.audioLength };
+		size_t in_strides[1] = { 1 };
+		size_t out_strides[1] = { 1 };
+		size_t in_dist = (size_t)objective.audioLength;
+		size_t out_dist = (size_t)objective.audioLength / 2 + 4;
+
+		//Update member variables with new information//
+		objective.fftOutSize = out_dist * 2;
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);
+
+		//Setup clFFT//
+		clfftSetupData fftSetup;
+		errorStatus_ = clfftInitSetupData(&fftSetup);
+		errorStatus_ = clfftSetup(&fftSetup);
+
+		//Create a default plan for a complex FFT//
+		errorStatus_ = clfftCreateDefaultPlan(&planHandle, context_(), dim, clLengths);
+
+		//Set plan parameters//
+		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
+		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
+		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationSize);
+		clfftSetPlanInStride(planHandle, dim, in_strides);
+		clfftSetPlanOutStride(planHandle, dim, out_strides);
+		clfftSetPlanDistance(planHandle, in_dist, out_dist);
+
+		//Bake clFFT plan//
+		errorStatus_ = clfftBakePlan(planHandle, 1, &commandQueue_(), NULL, NULL);
+		if (errorStatus_)
+			std::cout << "ERROR creating clFFT plan. Status code: " << errorStatus_ << std::endl;
+	}
 	void writePopulationData()
 	{
 
+	}
+	void readTestingData(void* aTestingData, size_t aTestingDataSize)
+	{
+		copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBuffer_, aTestingDataSize);
+		VKHelper::readBuffer(logicalDevice_, aTestingDataSize, stagingBufferMemory_, aTestingData);
 	}
 	void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
 	{
@@ -1186,6 +1282,21 @@ public:
 		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, storageBuffersMemory_[outputPopulationStepBuffer], aOutputPopulationStepData);
 		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[inputPopulationFitnessBuffer], aInputPopulationFitnessData);
 		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[outputPopulationFitnessBuffer], aOutputPopulationFitnessData);
+	}
+	void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
+	{
+		copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemory_, aInputPopulationValueData);
+		copyBuffer(storageBuffers_[outputPopulationValueBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemory_, aOutputPopulationValueData);
+		copyBuffer(storageBuffers_[inputPopulationStepBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemory_, aInputPopulationStepData);
+		copyBuffer(storageBuffers_[outputPopulationStepBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemory_, aOutputPopulationStepData);
+		copyBuffer(storageBuffers_[inputPopulationFitnessBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemory_, aInputPopulationFitnessData);
+		copyBuffer(storageBuffers_[outputPopulationFitnessBuffer], stagingBuffer_, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemory_, aOutputPopulationFitnessData);
 	}
 
 	void writeSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
@@ -1231,7 +1342,7 @@ public:
 		VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
 		calculateAudioFFT();	//@ToDo - Work out how to calculate FFT for GPU acceptable format.
 		VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
-		VKHelper::readBuffer(logicalDevice_, objective.fftOutSize * population.numDimensions * sizeof(float), storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
+		//VKHelper::readBuffer(logicalDevice_, objective.fftOutSize * population.numDimensions * sizeof(float), storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
 		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESTwo_);
 	}
 	void executeAllGenerations()
@@ -1343,7 +1454,7 @@ public:
 		VkCommandBufferAllocateInfo allocInfo = {};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandPool = commandPoolInit_;			//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+		allocInfo.commandPool = commandPoolStaging_;			//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
 		allocInfo.commandBufferCount = 1;
 
 		VkCommandBuffer commandBuffer;
@@ -1372,7 +1483,41 @@ public:
 		vkQueueWaitIdle(computeQueue_);
 
 		//Cleanup used comand pool//
-		vkFreeCommandBuffers(logicalDevice_, commandPoolInit_, 1, &aCommandBuffer);	//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+		vkFreeCommandBuffers(logicalDevice_, commandPoolStaging_, 1, &aCommandBuffer);	//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+	}
+
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+	{
+		VkCommandBufferAllocateInfo allocInfo = {};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandPool = commandPoolStaging_;
+		allocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer commandBuffer;
+		vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer);
+
+		VkCommandBufferBeginInfo beginInfo = {};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+			VkBufferCopy copyRegion = {};
+			copyRegion.srcOffset = 0; // Optional
+			copyRegion.dstOffset = 0; // Optional
+			copyRegion.size = size;
+			vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+		vkEndCommandBuffer(commandBuffer);
+
+		VkSubmitInfo submitInfo = {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(computeQueue_);
+
+		vkFreeCommandBuffers(logicalDevice_, commandPoolStaging_, 1, &commandBuffer);
 	}
 };
 
