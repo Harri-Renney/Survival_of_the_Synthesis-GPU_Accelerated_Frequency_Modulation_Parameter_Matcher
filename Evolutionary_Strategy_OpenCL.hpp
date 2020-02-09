@@ -131,7 +131,7 @@ public:
 		initMemory();
 
 		//Initialise OpenCL context//
-		initContextCL(0, 0);
+		initContextCL(1, 0);
 
 		initCLFFT();
 		initBuffersCL();

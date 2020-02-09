@@ -30,7 +30,7 @@
             "workgroupSize": 8
         },
         "Vulkan": {
-			"workgroupSize": 32
+			"workgroupSize": 8
         },
         "input": "params",
         "params": [1450.0, 3.0, 200.0, 1.0],

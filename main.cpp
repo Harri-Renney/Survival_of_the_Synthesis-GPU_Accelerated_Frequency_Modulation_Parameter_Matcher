@@ -127,6 +127,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
+			args.deviceType = INTEGRATED;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
@@ -226,9 +227,9 @@ int main(int argc, char* argv[])
 		//esOpenCL.executeSynthesise();
 
 		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize, inputPopulationSteps, outputPopulationSteps, populationStepSize, inputPopulationFitness, outputPopulationFitness, populationFitnessSize);
-		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		//es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
+		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationSize; ++i)
 		{
