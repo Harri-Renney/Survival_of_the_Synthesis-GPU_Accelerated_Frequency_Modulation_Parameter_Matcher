@@ -1,6 +1,31 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+/*
+ *  Random number generator
+ *  source: http://cas.ee.ic.ac.uk/people/dt10/research/rngs-gpu-mwc64x.html
+ */
+uint MWC64X(inout uvec2 state)
+{
+    //enum _dummy { A=4294883355U };
+    uint A = 4294883355U ;
+    uint x=(state).x, c=(state).y;  // Unpack the state
+    uint res=x^c;                     // Calculate the result
+    //uint hi=mul_hi(x,A);              // Step the RNG
+    uint hi  = (x*A);
+    x=x*A+c;
+    c=hi+ uint(x<c);
+    state = uvec2(x,c);               // Pack the state back up
+    return res;                       // Return the next result
+}
+
+float random (const vec2 state)
+{
+    return fract(sin(dot(state.xy,
+                         vec2(12.9898,78.233)))*
+        43758.5453123);
+}
+
 layout(binding = 0) buffer inputPopulationValueBuffer
 {
    float inputPopulationValuePayload[];
@@ -29,7 +54,7 @@ layout(binding = 5) buffer outputPopulationFitnessBuffer
 
 layout(binding = 6) buffer randomStatesBuffer
 {
-   vec2 randomStatesPayload[];
+   uvec2 randomStatesPayload[];
 };
 
 layout(binding = 7) buffer paramMinBuffer
@@ -63,12 +88,12 @@ layout( push_constant ) uniform index{uint rotationIndex;} RotationIndex;
 layout (constant_id = 1) const uint WORKGROUP_X = 32;
 layout (constant_id = 2) const uint WORKGROUP_Y = 1;
 layout (constant_id = 3) const uint WORKGROUP_Z = 1;
-layout (constant_id = 4) const uint WRKGRPSIZE = 32;
+layout (constant_id = 4) const uint WRKGRPSIZE = WORKGROUP_X * WORKGROUP_Y;
 layout (constant_id = 5) const uint NUM_DIMENSIONS = 4;
 
 layout(constant_id = 6) const uint POPULATION_COUNT = 1536;
-layout(constant_id = 7) const uint NUM_WGS_FOR_PARENTS = 192 / 32; //Need to work out? In GPU_Match CPU code??
-layout(constant_id = 8) const uint CHUNK_SIZE_FITNESS = (32 / 2);
+layout(constant_id = 7) const uint NUM_WGS_FOR_PARENTS = 192 / WRKGRPSIZE; //Need to work out? In GPU_Match CPU code??
+layout(constant_id = 8) const uint CHUNK_SIZE_FITNESS = (WRKGRPSIZE / 2);
 layout(constant_id = 9) const uint AUDIO_WAVE_FORM_SIZE = 1024;
 
 layout(constant_id = 10) const uint FFT_OUT_SIZE = 1023;
@@ -87,7 +112,7 @@ layout(constant_id = 19) const float BETA = 0.5;
  * terms of the work group size. The synthesis is done in chunks to avoid local
  * memory getting to big. This should really be tuned based on the hardware. */
 layout (constant_id = 20) const uint CHUNKS_PER_WG_SYNTH = 1;
-layout (constant_id = 21) const uint CHUNK_SIZE_SYNTH = 32/1;
+layout (constant_id = 21) const uint CHUNK_SIZE_SYNTH = WRKGRPSIZE/CHUNKS_PER_WG_SYNTH;
 /* Constant used for FM synthesis */
 layout (constant_id = 22) const float ONE_OVER_SAMPLE_RATE_TIMES_2_PI = 0.00014247573;
 
@@ -96,34 +121,25 @@ layout(constant_id = 23) const uint POPULATION_SIZE = 1536 * (4);
 
 layout (local_size_x_id = 1, local_size_y_id = 2) in;
 
-shared float group_values[WRKGRPSIZE * NUM_DIMENSIONS];
-shared float group_steps[WRKGRPSIZE * NUM_DIMENSIONS];
-shared float group_fitnesses[WRKGRPSIZE];
-
-
 /*------------------------------------------------------------------------------
-    Copy
+    Population Initialise
 ------------------------------------------------------------------------------*/
 void main()
 {
-   //Set all work item IDs//
-   //uint gid = gl_GlobalInvocationID.x;
-   //uint tid = gl_LocalInvocationID.x;
-   //uint wid = gl_WorkGroupID.x;
-//
-   //for(int i = 0; i < NUM_DIMENSIONS; i++)
-   //{
-   //   inputPopulationValuePayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid] =
-   //      outputPopulationValuePayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid];
-   //   inputPopulationStepPayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid] =
-   //      outputPopulationStepPayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid];
-   //}
-   //inputPopulationFitnessPayload[gid] = outputPopulationFitnessPayload[gid];
+    uint gid = gl_GlobalInvocationID.x;
 
-   //inputPopulationFitnessPayload[0] = RotationIndex.rotationIndex;
-   if(gl_GlobalInvocationID.x == 0)
-   {
-      //inputPopulationValuePayload[rotationIndexPayload * POPULATION_SIZE] = RotationIndex.rotationIndex + 0.5;
-      rotationIndexPayload = rotationIndexPayload == 0 ? 1 : 0;
-   }
+    uint populationStartIndex = rotationIndexPayload * POPULATION_SIZE;
+
+    for(uint i = 0; i < NUM_DIMENSIONS; ++i)
+    {
+        inputPopulationStepPayload[populationStartIndex + (gid * NUM_DIMENSIONS + i)] = 0.1f;
+        float randomValue = float((MWC64X(randomStatesPayload[gid])) /  4294967296.0f);  //Should this just use index? Surely repeating 'random' values...
+        //randomValue = random(vec2(randomStatesPayload[gid].x /  4294967296.0, randomStatesPayload[gid].y/  4294967296.0));
+        //float randomValue = float(randomStatesPayload[gid].x / 2147483647.0f);
+        //float randomValue = random(randomStatesPayload[gid]);
+        //randomStatesPayload[gid].x = randomStatesPayload[gid].x+0.00001;
+        //randomStatesPayload[gid].y = randomStatesPayload[gid].y+0.00001;
+        inputPopulationValuePayload[populationStartIndex + (gid * NUM_DIMENSIONS + i)] = (randomValue < 0.0f) ? -randomValue : randomValue;
+    }
+    //inputPopulationValuePayload[0] = 12.0;
 }

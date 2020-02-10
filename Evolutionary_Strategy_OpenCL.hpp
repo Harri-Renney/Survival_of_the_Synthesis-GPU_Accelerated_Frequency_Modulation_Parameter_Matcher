@@ -1,8 +1,10 @@
 #ifndef EVOLUTIONARY_STRATEGY_OPENCL_HPP
 #define EVOLUTIONARY_STRATEGY_OPENCL_HPP
 
-#define CL_HPP_TARGET_OPENCL_VERSION 210
-#define CL_HPP_MINIMUM_OPENCL_VERSION 200
+//#define CL_HPP_TARGET_OPENCL_VERSION 210
+//#define CL_HPP_MINIMUM_OPENCL_VERSION 200
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
 #include <CL/cl2.hpp>
 //#include <CL/cl.hpp>
 #include <CL/cl_gl.h>
@@ -596,7 +598,7 @@ public:
 				if (strstr(platform.getInfo<CL_PLATFORM_NAME>().c_str(), "AMD"))
 				{
 					std::cout << "\tAMD Specific:" << std::endl;
-					std::cout << "\t\tAMD Wavefront size: " << device.getInfo<CL_DEVICE_WAVEFRONT_WIDTH_AMD>() << std::endl;
+					//std::cout << "\t\tAMD Wavefront size: " << device.getInfo<CL_DEVICE_WAVEFRONT_WIDTH_AMD>() << std::endl;
 				}
 			}
 			std::cout << std::endl;
