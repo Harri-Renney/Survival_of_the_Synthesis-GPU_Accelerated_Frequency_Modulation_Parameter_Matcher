@@ -40,6 +40,7 @@ struct Evolutionary_Strategy_Vulkan_Arguments
 	uint32_t workgroupZ = 1;
 	uint32_t workgroupSize = workgroupX * workgroupY * workgroupZ;
 	uint32_t numWorkgroupsPerParent;
+	VkPhysicalDeviceType deviceType;
 };
 
 struct Specialization_Constants
@@ -104,6 +105,7 @@ private:
 
 	//Physical Device//
 	VkPhysicalDevice physicalDevice_;
+	VkPhysicalDeviceType deviceType_;
 
 	//Logical Device//
 	VkDevice logicalDevice_;
@@ -138,6 +140,10 @@ private:
 	VkDescriptorPool descriptorPool_;
 	VkDescriptorSet descriptorSet_;
 	VkDescriptorSetLayout descriptorSetLayout_;
+
+	std::vector<VkDescriptorPool> descriptorPools_;
+	std::vector<VkDescriptorSetLayout> descriptorSetLayouts_;
+	std::vector<VkDescriptorSet> descriptorSets_;
 
 	VkDescriptorPool descriptorPoolFFT_;
 	VkDescriptorSet descriptorSetFFT_;
@@ -468,13 +474,7 @@ private:
 	//@ToDo - Correctly find the AMD GPU, not use intel one.//
 	void findPhysicalDevice()
 	{
-		/*
-		In this function, we find a physical device that can be used with Vulkan.
-		*/
-
-		/*
-		So, first we will list all physical devices on the system with vkEnumeratePhysicalDevices .
-		*/
+		//Collect physical devices available to VUlkan//
 		uint32_t deviceCount;
 		vkEnumeratePhysicalDevices(instance_, &deviceCount, NULL);
 		if (deviceCount == 0) {
@@ -484,30 +484,7 @@ private:
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
 
-		/*
-		Next, we choose a device that can be used for our purposes.
-
-		With VkPhysicalDeviceFeatures(), we can retrieve a fine-grained list of physical features supported by the device.
-		However, in this demo, we are simply launching a simple compute shader, and there are no
-		special physical features demanded for this task.
-
-		With VkPhysicalDeviceProperties(), we can obtain a list of physical device properties. Most importantly,
-		we obtain a list of physical device limitations. For this application, we launch a compute shader,
-		and the maximum size of the workgroups and total number of compute shader invocations is limited by the physical device,
-		and we should ensure that the limitations named maxComputeWorkGroupCount, maxComputeWorkGroupInvocations and
-		maxComputeWorkGroupSize are not exceeded by our application.  Moreover, we are using a storage buffer in the compute shader,
-		and we should ensure that it is not larger than the device can handle, by checking the limitation maxStorageBufferRange.
-
-		However, in our application, the workgroup size and total number of shader invocations is relatively small, and the storage buffer is
-		not that large, and thus a vast majority of devices will be able to handle it. This can be verified by looking at some devices at_
-		http://vulkan.gpuinfo.org/
-
-		Therefore, to keep things simple and clean, we will not perform any such checks here, and just pick the first physical
-		device in the list. But in a real and serious application, those limitations should certainly be taken into account.
-
-		*/
-		//physicalDevice_ = devices[1];
-		//return;
+		//Iterate through and choose appropriate device//
 		for (VkPhysicalDevice device : devices) {
 			if (true) { // As above stated, we do no feature checks, so just accept.
 				VkPhysicalDeviceProperties deviceProperties;
@@ -516,9 +493,8 @@ private:
 				vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 				printf("Device found: %s\n", deviceProperties.deviceName);
 				printf("Device maxDescriptorSetStorageBuffers: %d\n", deviceProperties.limits.maxDescriptorSetStorageBuffers);
-				//printf("Device features: %s\n", deviceFeatures.);
 		
-				if(deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+				if(deviceProperties.deviceType == deviceType_)
 				{
 					physicalDevice_ = device;
 					break;
@@ -872,216 +848,6 @@ private:
 		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
 		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolStaging_));
 	}
-	void createPopulationInitialiseCommandBuffer()
-	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
-		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		commandPoolCreateInfo.flags = 0;
-		// the queue family of this command pool. All command buffers allocated from this command pool,
-		// must be submitted to queues of this family ONLY. 
-		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolInit_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolInit_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferInit_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferInit_, &beginInfo)); // start recording commands.
-
-		/*
-		We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-		The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-		*/
-		vkCmdBindDescriptorSets(commandBufferInit_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[initPopulation], 0, 1, &descriptorSet_, 0, NULL);
-		vkCmdBindPipeline(commandBufferInit_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[initPopulation]);
-		
-		//Include loop and update push constants every iteration//
-		//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[initPopulation], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-		/*
-		Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-		The number of workgroups is specified in the arguments.
-		If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-		*/
-		vkCmdDispatch(commandBufferInit_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferInit_)); // end recording commands.
-	}
-	void createESCommandBufferOne()
-	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
-		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		commandPoolCreateInfo.flags = 0;
-		// the queue family of this command pool. All command buffers allocated from this command pool,
-		// must be submitted to queues of this family ONLY. 
-		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolESOne_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolESOne_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferESOne_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferESOne_, &beginInfo)); // start recording commands.
-
-		for (uint8_t i = recombinePopulation; i != VulkanFFT; ++i)
-		{
-			if (i == VulkanFFT)
-			{
-			}
-			//else if (i == recombinePopulation) {}
-			//else if (i == mutatePopulation) {}
-			//else if (i == synthesisePopulation) {}
-			//else if(i == sortPopulation) {}
-			//else if (i == copyPopulation) {}
-			//else if (i == applyWindowPopulation) {}
-			//else if (i == fitnessPopulation) {}
-			else
-			{
-				/*
-				We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-				The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-				*/
-				vkCmdBindDescriptorSets(commandBufferESOne_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[i], 0, 1, &descriptorSet_, 0, NULL);
-				vkCmdBindPipeline(commandBufferESOne_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[i]);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-				/*
-				Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-				The number of workgroups is specified in the arguments.
-				If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-				*/
-				vkCmdDispatch(commandBufferESOne_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-				vkCmdPipelineBarrier(commandBufferESOne_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, NULL, 0, NULL, 0, NULL, 0, NULL);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
-			}
-		}
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferESOne_)); // end recording commands.
-	}
-	void createESCommandBufferTwo()
-	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
-		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		commandPoolCreateInfo.flags = 0;
-		// the queue family of this command pool. All command buffers allocated from this command pool,
-		// must be submitted to queues of this family ONLY. 
-		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolESTwo_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolESTwo_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferESTwo_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferESTwo_, &beginInfo)); // start recording commands.
-
-		for (uint8_t i = fitnessPopulation; i != numPipelines_; ++i)
-		{
-			if (i == VulkanFFT)
-			{
-			}
-			//else if (i == recombinePopulation) {}
-			//else if (i == mutatePopulation) {}
-			//else if (i == synthesisePopulation) {}
-			//else if(i == sortPopulation) {}
-			//else if (i == copyPopulation) {}
-			//else if (i == applyWindowPopulation) {}
-			//else if (i == fitnessPopulation) {}
-			else
-			{
-				/*
-				We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-				The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-				*/
-				vkCmdBindDescriptorSets(commandBufferESTwo_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[i], 0, 1, &descriptorSet_, 0, NULL);
-				vkCmdBindPipeline(commandBufferESTwo_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[i]);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-				/*
-				Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-				The number of workgroups is specified in the arguments.
-				If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-				*/
-				vkCmdDispatch(commandBufferESTwo_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-				vkCmdPipelineBarrier(commandBufferESTwo_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, NULL, 0, NULL, 0, NULL, 0, NULL);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
-			}
-		}
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferESTwo_)); // end recording commands.
-	}
 	void calculateAudioFFT()
 	{
 		//int counter = 0;
@@ -1169,12 +935,6 @@ private:
 	{
 		inputBuffer = cl::Buffer(context_, CL_MEM_READ_WRITE, storageBufferSizes_[outputAudioBuffer]);
 		outputBuffer = cl::Buffer(context_, CL_MEM_READ_WRITE, storageBufferSizes_[inputFFTDataBuffer]);
-
-		//Write intial data to buffers @ToDO - Do elsewhere//
-		//commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMinBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMins.data());
-		//commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMaxBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMaxs.data());
-		//for (uint8_t i = 0; i != numBuffers_; ++i)
-		//	storageBuffers_[i] = cl::Buffer(context_, memoryFlags, storageBufferSizes_[i]);
 	}
 public:
 	uint32_t* rotationIndex_;
@@ -1195,20 +955,9 @@ public:
 		numWorkgroupsX(globalSize / workgroupX),
 		numWorkgroupsY(1),
 		numWorkgroupsZ(1),
-		chunkSizeFitness(workgroupSize / 2)
-
+		chunkSizeFitness(workgroupSize / 2),
+		deviceType_(args.deviceType)
 	{
-		//for (int i = 0; i != paramMinBuffer; ++i)
-		//	storageBufferSizes_[i] = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float);
-		//
-		//storageBufferSizes_[paramMinBuffer] = population.numDimensions * sizeof(float);
-		//storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
-		//storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
-		//
-		////After .fftOutSize worked out//
-		//storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
-		//storageBufferSizes_[inputFFTTargetBuffer] = objective.fftOutSize * sizeof(float);	//objective.fftSizeHalf
-
 		for (int i = 0; i != randomStatesBuffer; ++i)
 			storageBufferSizes_[i] = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float) * 2;
 
@@ -1239,9 +988,22 @@ public:
 		initConstantsVK();
 		createComputePipelines();
 		createCopyCommandPool();
-		createPopulationInitialiseCommandBuffer();
-		createESCommandBufferOne();
-		createESCommandBufferTwo();
+
+		std::vector<VkPipelineLayout> pipelineLayoutsTemp = { computePipelineLayouts_[initPopulation] };
+		std::vector<VkPipeline> pipelinesTemp = { computePipelines_[initPopulation] };
+		createCommandBuffer(commandPoolInit_, commandBufferInit_, pipelineLayoutsTemp, pipelinesTemp);
+
+		pipelineLayoutsTemp = { computePipelineLayouts_[recombinePopulation], computePipelineLayouts_[mutatePopulation], computePipelineLayouts_[synthesisePopulation], computePipelineLayouts_[applyWindowPopulation] };
+		pipelinesTemp = { computePipelines_[recombinePopulation], computePipelines_[mutatePopulation], computePipelines_[synthesisePopulation], computePipelines_[applyWindowPopulation] };
+		createCommandBuffer(commandPoolESOne_, commandBufferESOne_, pipelineLayoutsTemp, pipelinesTemp);
+
+		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation], computePipelineLayouts_[copyPopulation] };
+		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation], computePipelines_[copyPopulation] };
+		createCommandBuffer(commandPoolESTwo_, commandBufferESTwo_, pipelineLayoutsTemp, pipelinesTemp);
+
+		//createPopulationInitialiseCommandBuffer();
+		//createESCommandBufferOne();
+		//createESCommandBufferTwo();
 		initRandomStateBuffer();
 		writeLocalBuffer(storageBuffers_[paramMinBuffer], 4 * sizeof(float), (void*)objective.paramMins.data());
 		writeLocalBuffer(storageBuffers_[paramMaxBuffer], 4 * sizeof(float), (void*)objective.paramMaxs.data());
@@ -1518,6 +1280,68 @@ public:
 	{
 		VKHelper::writeBuffer(logicalDevice_, aSize, stagingBufferMemorySrc, aInput);
 		copyBuffer(stagingBufferSrc, aBuffer, aSize);
+	}
+
+	void createCommandBuffer(VkCommandPool& aCommandPool, VkCommandBuffer& aCommandBuffer, std::vector<VkPipelineLayout>& aPipelineLayouts, std::vector<VkPipeline>& aPipelines)
+	{
+		/*
+		We are getting closer to the end. In order to send commands to the device(GPU),
+		we must first record commands into a command buffer.
+		To allocate a command buffer, we must first create a command pool. So let us do that.
+		*/
+		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
+		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		commandPoolCreateInfo.flags = 0;
+		// the queue family of this command pool. All command buffers allocated from this command pool,
+		// must be submitted to queues of this family ONLY. 
+		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
+		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &aCommandPool));
+
+		/*
+		Now allocate a command buffer from the command pool.
+		*/
+		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
+		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		commandBufferAllocateInfo.commandPool = aCommandPool; // specify the command pool to allocate from. 
+		// if the command buffer is primary, it can be directly submitted to queues. 
+		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
+		// submitted to a queue. To keep things simple, we use a primary command buffer. 
+		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
+		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &aCommandBuffer)); // allocate command buffer.
+
+		/*
+		Now we shall start recording commands into the newly allocated command buffer.
+		*/
+		VkCommandBufferBeginInfo beginInfo = {};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
+		VK_CHECK_RESULT(vkBeginCommandBuffer(aCommandBuffer, &beginInfo)); // start recording commands.
+
+		for (uint32_t i = 0; i != aPipelineLayouts.size(); ++i)
+		{
+
+			/*
+			We need to bind a pipeline, AND a descriptor set before we dispatch.
+
+			The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
+			*/
+			vkCmdBindDescriptorSets(aCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, aPipelineLayouts[i], 0, 1, &descriptorSet_, 0, NULL);
+			vkCmdBindPipeline(aCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, aPipelines[i]);
+
+			//Include loop and update push constants every iteration//
+			//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[initPopulation], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
+
+			/*
+			Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
+			The number of workgroups is specified in the arguments.
+			If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
+			*/
+			vkCmdDispatch(aCommandBuffer, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
+			vkCmdPipelineBarrier(aCommandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, NULL, 0, NULL, 0, NULL, 0, NULL);
+		}
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(aCommandBuffer)); // end recording commands.
 	}
 };
 

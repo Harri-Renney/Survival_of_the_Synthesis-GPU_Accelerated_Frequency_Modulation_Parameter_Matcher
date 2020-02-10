@@ -202,11 +202,14 @@ public:
 
 		//Get device list from context//
 		std::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
+		device_ = devices[aDevice];
 
 		//Create command queue for first device - Profiling enabled//
 		commandQueue_ = cl::CommandQueue(context_, devices[aDevice], CL_QUEUE_PROFILING_ENABLE, &errorStatus_);	//Need to specify device 1[0] of platform 3[2] for dedicated graphics - Harri Laptop.
 		if (errorStatus_)
 			std::cout << "ERROR creating command queue for device. Status code: " << errorStatus_ << std::endl;
+
+		std::cout << "\t\tDevice Name Chosen: " << device_.getInfo<CL_DEVICE_NAME>() << std::endl;
 	}
 	void initKernelsCL(std::string aPath)
 	{

@@ -146,6 +146,7 @@ int main(int argc, char* argv[])
 			args.workgroupX = j["type"]["Vulkan"]["workgroupSize"];
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
+			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 
 			es = new Evolutionary_Strategy_Vulkan(args);
 		}
@@ -226,7 +227,6 @@ int main(int argc, char* argv[])
 		//esOpenCL.executeFitness();
 		//esOpenCL.executeSynthesise();
 
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize, inputPopulationSteps, outputPopulationSteps, populationStepSize, inputPopulationFitness, outputPopulationFitness, populationFitnessSize);
 		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
