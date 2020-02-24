@@ -18,7 +18,7 @@
 
 #include "Evolutionary_Strategy.hpp"
 
-enum DeviceType { INTEGRATED, DISCRETE };
+enum DeviceType { INTEGRATED = 32902, DISCRETE = 4098, NVIDIA = 4318};
 
 struct Evolutionary_Strategy_OpenCL_Arguments
 {
@@ -109,7 +109,7 @@ public:
 		workgroupSize(workgroupX*workgroupY*workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
 		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" }),
-		globalSize_(population.populationSize)
+		globalSize_(population.populationLength)
 	{
 		init();
 	}
@@ -122,7 +122,7 @@ public:
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
 		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" }),
-		globalSize_(population.populationSize),
+		globalSize_(population.populationLength),
 		deviceType_(args.deviceType)
 	{
 		init();
@@ -157,7 +157,7 @@ public:
 
 		//Update member variables with new information//
 		objective.fftOutSize = out_dist * 2;
-		storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationLength * objective.fftOutSize * sizeof(float);
 		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);
 
 		//Setup clFFT//
@@ -172,7 +172,7 @@ public:
 		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
 		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
 		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
-		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationSize);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationLength);
 		clfftSetPlanInStride(planHandle, dim, in_strides);
 		clfftSetPlanOutStride(planHandle, dim, out_strides);
 		clfftSetPlanDistance(planHandle, in_dist, out_dist);
@@ -185,28 +185,56 @@ public:
 	//@ToDo - Right now pick platform. Can extend to pick best available.
 	void initContextCL(uint8_t aPlatform, uint8_t aDevice)
 	{
-		//Discover platforms//
 		std::vector <cl::Platform> platforms;
 		cl::Platform::get(&platforms);
+		for (cl::vector<cl::Platform>::iterator it = platforms.begin(); it != platforms.end(); ++it)
+		{
+			cl::Platform platform(*it);
 
-		//Create contex properties for first platform//
-		cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platforms[aPlatform])(), 0 };	//Need to specify platform 3 for dedicated graphics - Harri Laptop.
-
-		//Create context context using platform for GPU device//
-		if (deviceType_ == DeviceType::INTEGRATED)
-			context_ = cl::Context(CL_DEVICE_TYPE_CPU, contextProperties);
-		if(deviceType_ == DeviceType::DISCRETE)
+			cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platform)(), 0 };
 			context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
-		else
-			context_ = cl::Context(CL_DEVICE_TYPE_ALL, contextProperties);
+		
+			cl::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
+		
+			int device_id = 0;
+			for (cl::vector<cl::Device>::iterator it2 = devices.begin(); it2 != devices.end(); ++it2)
+			{
+				cl::Device device(*it2);
+				auto d = device.getInfo<CL_DEVICE_VENDOR_ID>();
+				if (d == deviceType_)
+				{
+					//Create command queue for first device - Profiling enabled//
+					commandQueue_ = cl::CommandQueue(context_, device, CL_QUEUE_PROFILING_ENABLE, &errorStatus_);	//Need to specify device 1[0] of platform 3[2] for dedicated graphics - Harri Laptop.
+					if (errorStatus_)
+						std::cout << "ERROR creating command queue for device. Status code: " << errorStatus_ << std::endl;
 
-		//Get device list from context//
-		std::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
+					std::cout << "\t\tDevice Name Chosen: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
-		//Create command queue for first device - Profiling enabled//
-		commandQueue_ = cl::CommandQueue(context_, devices[aDevice], CL_QUEUE_PROFILING_ENABLE, &errorStatus_);	//Need to specify device 1[0] of platform 3[2] for dedicated graphics - Harri Laptop.
-		if (errorStatus_)
-			std::cout << "ERROR creating command queue for device. Status code: " << errorStatus_ << std::endl;
+					return;
+				}
+			}
+			std::cout << std::endl;
+		}
+
+
+		//Discover platforms//
+		//std::vector <cl::Platform> platforms;
+		//cl::Platform::get(&platforms);
+		//
+		////Create contex properties for first platform//
+		//cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platforms[aPlatform])(), 0 };	//Need to specify platform 3 for dedicated graphics - Harri Laptop.
+		//
+		////Create context context using platform for GPU device//
+		//if (deviceType_ == DeviceType::INTEGRATED)
+		//	context_ = cl::Context(CL_DEVICE_TYPE_CPU, contextProperties);
+		//if(deviceType_ == DeviceType::DISCRETE)
+		//	context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
+		//else
+		//	context_ = cl::Context(CL_DEVICE_TYPE_ALL, contextProperties);
+		//
+		////Get device list from context//
+		//std::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
+		//device_ = devices[aDevice];
 	}
 	void initKernelsCL(std::string aPath)
 	{
@@ -232,8 +260,8 @@ public:
 			workgroupSize,
 			population.numDimensions,
 			objective.audioLength,
-			population.populationSize,	//@ToDo - SHOULD THIS BE POPULATION SIZE OR NUMBER OF PARENTS!
-			population.populationSize * population.numDimensions,
+			population.populationLength,	//@ToDo - SHOULD THIS BE POPULATION SIZE OR NUMBER OF PARENTS!
+			population.populationLength * population.numDimensions,
 			numWorkgroupsPerParent,
 			alpha, 
 			oneOverAlpha, 
@@ -261,17 +289,16 @@ public:
 	}
 	void initBufferSizesCL()
 	{
-
 		//Initialise buffer sizes//
 		for (int i = 0; i != randomStatesBuffer; ++i)
-			storageBufferSizes_[i] = population.populationSize * population.numDimensions * sizeof(float) * 2;
+			storageBufferSizes_[i] = population.populationLength * population.numDimensions * sizeof(float) * 2;
 
-		storageBufferSizes_[randomStatesBuffer] = population.populationSize * sizeof(glm::uvec2);
-		storageBufferSizes_[inputPopulationFitnessBuffer] = population.populationSize * sizeof(float) * 2;
-		storageBufferSizes_[outputPopulationFitnessBuffer] = population.populationSize * sizeof(float) * 2;
+		storageBufferSizes_[randomStatesBuffer] = population.populationLength * sizeof(glm::uvec2);
+		storageBufferSizes_[inputPopulationFitnessBuffer] = population.populationLength * sizeof(float) * 2;
+		storageBufferSizes_[outputPopulationFitnessBuffer] = population.populationLength * sizeof(float) * 2;
 		storageBufferSizes_[paramMinBuffer] = population.numDimensions * sizeof(float);
 		storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
-		storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
+		storageBufferSizes_[outputAudioBuffer] = population.populationLength * objective.audioLength * sizeof(float);
 		storageBufferSizes_[rotationIndexBuffer] = sizeof(uint32_t);
 		storageBufferSizes_[wavetableBuffer] = objective.wavetableSize * sizeof(float);
 	}
@@ -285,9 +312,9 @@ public:
 			cl::Buffer& currentBuffer = *iter;
 
 			//Set access flag appropriatly for each buffer//
-			if (idx == paramMinBuffer || idx == paramMaxBuffer || idx == inputFFTTargetBuffer)
-				memoryFlags = CL_MEM_READ_ONLY;
-			else
+			//if (idx == paramMinBuffer || idx == paramMaxBuffer || idx == inputFFTTargetBuffer)
+			//	memoryFlags = CL_MEM_READ_ONLY;
+			//else
 				memoryFlags = CL_MEM_READ_WRITE;
 
 			currentBuffer = cl::Buffer(context_, memoryFlags, storageBufferSizes_[idx]);
@@ -376,7 +403,7 @@ public:
 		//std::uniform_int_distribution<int> distribution(0, 2147483647);
 		std::uniform_int_distribution<int> distribution(0, 32767);
 
-		uint32_t numRandomStates = population.populationSize;
+		uint32_t numRandomStates = population.populationLength;
 		glm::uvec2* rand_state = new glm::uvec2[numRandomStates];
 		for (int i = 0; i < numRandomStates; ++i)
 		{
@@ -418,6 +445,10 @@ public:
 		//Read population input and output fitness//
 		commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationFitnessBuffer], CL_TRUE, 0, aPopulationFitnessSize, aInputPopulationFitnessData);
 		commandQueue_.enqueueReadBuffer(storageBuffers_[outputPopulationFitnessBuffer], CL_TRUE, 0, aPopulationFitnessSize, aOutputPopulationFitnessData);
+	}
+	void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
+	{
+		readPopulationData(aInputPopulationValueData, aOutputPopulationValueData, aPopulationValueSize, aInputPopulationStepData, aOutputPopulationStepData, aPopulationStepSize, aInputPopulationFitnessData, aOutputPopulationFitnessData, aPopulationFitnessSize);
 	}
 
 	void writeSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
@@ -487,8 +518,9 @@ public:
 				std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
 				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, globalSize_, workgroupSize, NULL);
-				//clFinish(commandQueue_());
 				commandQueue_.finish();
+				//clFinish(commandQueue_());
+				//commandQueue_.flush();
 
 				auto end = std::chrono::steady_clock::now();
 				auto diff = end - start;
@@ -515,6 +547,7 @@ public:
 		//Execute the baked clFFT plan//
 		errorStatus_ = clfftEnqueueTransform(planHandle, CLFFT_FORWARD, 1, &commandQueue_(), 0, NULL, NULL, &storageBuffers_[outputAudioBuffer](), &storageBuffers_[inputFFTDataBuffer](), NULL);
 		commandQueue_.finish();
+		//commandQueue_.flush();
 	}
 
 	void setTargetAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -536,6 +569,7 @@ public:
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
+			//initKernelArgumentsCL();
 			initPopulationCL();
 
 			//Execute number of ES generations on chunk//
@@ -587,6 +621,7 @@ public:
 				std::cout << "\t\tDevice Type: " << device.getInfo<CL_DEVICE_TYPE>();
 				std::cout << " (GPU: " << CL_DEVICE_TYPE_GPU << ", CPU: " << CL_DEVICE_TYPE_CPU << ")" << std::endl;
 				std::cout << "\t\tDevice Vendor: " << device.getInfo<CL_DEVICE_VENDOR>() << std::endl;
+				std::cout << "\t\tDevice Vendor ID: " << device.getInfo<CL_DEVICE_VENDOR_ID>() << std::endl;
 				std::cout << "\t\tDevice Max Compute Units: " << device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
 				std::cout << "\t\tDevice Global Memory: " << device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>() << std::endl;
 				std::cout << "\t\tDevice Max Clock Frequency: " << device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>() << std::endl;

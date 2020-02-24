@@ -21,16 +21,16 @@
         "paramMins": [0.0, 0.0, 0.0, 0.0],
         "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
         "fitnessThreshold": 0.00001,
-        "numGenerations": 50
+        "numGenerations": 100
     },
 
     "type": {
-        "implementation": "Vulkan",
+        "implementation": "OpenCL",
         "OpenCL": {
-            "workgroupSize": 8
+            "workgroupSize": 32
         },
         "Vulkan": {
-			"workgroupSize": 8
+			"workgroupSize": 32
         },
         "input": "params",
         "params": [1450.0, 3.0, 200.0, 1.0],

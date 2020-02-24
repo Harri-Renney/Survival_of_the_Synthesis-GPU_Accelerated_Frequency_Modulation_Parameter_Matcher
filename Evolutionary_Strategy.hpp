@@ -19,7 +19,8 @@ struct Population
 	uint32_t numParents = 197;
 	uint32_t numOffspring = 960;
 	uint32_t numDimensions = 4;
-	uint32_t populationSize = numParents + numOffspring;
+	uint32_t populationLength = numParents + numOffspring;
+	uint32_t populationSize = (numParents + numOffspring) * sizeof(float);
 
 	float *data;
 
@@ -461,8 +462,8 @@ public:
 	const float beta;
 public:
 	Evolutionary_Strategy() :
-		population({ 1024, 2048, 1024 + 2048, 4, new float[(4 + 1) * 1024 + 2048] }),
-		objective(population.populationSize, population.numDimensions, { 0.0,0.0,0.0,0.0 }, { 0.0,0.0,0.0,0.0 }, 10),
+		population({ 1024, 2048, 1024 + 2048, 4, 1024 + 2048, new float[(4 + 1) * 1024 + 2048] }),
+		objective(population.populationLength, population.numDimensions, { 0.0,0.0,0.0,0.0 }, { 0.0,0.0,0.0,0.0 }, 10),
 		numGenerations(100),
 		mPI(3.14159265358979323846),
 		alpha(1.4f),
@@ -472,8 +473,8 @@ public:
 		beta(sqrtf(betaScale))
 	{}
 	Evolutionary_Strategy(const uint32_t aNumGenerations, const uint32_t aNumParents, const uint32_t aNumOffspring, const uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
-		population({aNumParents, aNumOffspring, aNumDimensions, aNumParents + aNumOffspring, new float[(aNumDimensions+1) * aNumParents + aNumOffspring]}),
-		objective(population.populationSize, population.numDimensions, aParamMin, aParamMax, aAudioLengthLog2),
+		population({aNumParents, aNumOffspring, aNumDimensions, aNumParents + aNumOffspring, (aNumParents + aNumOffspring) * sizeof(float), new float[(aNumDimensions+1) * aNumParents + aNumOffspring]}),
+		objective(population.populationLength, population.numDimensions, aParamMin, aParamMax, aAudioLengthLog2),
 		numGenerations(aNumGenerations),
 		mPI(3.14159265358979323846),
 		alpha(1.4f),
