@@ -117,7 +117,7 @@ private:
 	//Pipeline//
 	//FFT comes inbetween applyWindowPopulation & fitnessPopulation//
 	static const int numPipelines_ = 9;
-	enum computePipelineNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, VulkanFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	enum computePipelineNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, VulkanFFT, fitnessPopulation, sortPopulation, rotatePopulation};
 	std::vector<std::string> shaderNames_;
 	VkPipeline computePipelines_[numPipelines_];
 	VkPipelineLayout computePipelineLayouts_[numPipelines_];
@@ -125,12 +125,17 @@ private:
 	//Command Buffer//
 	VkCommandPool commandPoolInit_;
 	VkCommandBuffer commandBufferInit_;
+	VkQueryPool queryPoolInit_;
 
 	VkCommandPool commandPoolESOne_;
 	VkCommandBuffer commandBufferESOne_;
+	VkQueryPool queryPoolESOne_[5];
 
 	VkCommandPool commandPoolESTwo_;
 	VkCommandBuffer commandBufferESTwo_;
+	VkQueryPool queryPoolESTwo_[3];
+
+	float shaderExecuteTime_[numPipelines_];
 
 	VkCommandPool commandPoolFFT_;
 	VkCommandBuffer commandBufferFFT_;
@@ -298,7 +303,7 @@ private:
 		specializationData.workgroupZ = workgroupZ;
 		specializationData.workgroupSize = workgroupSize;
 		specializationData.numDimensions = population.numDimensions;
-		specializationData.populationCount = population.populationSize;
+		specializationData.populationCount = population.populationLength;
 		specializationData.numWorkgroupsPerParent = population.numParents / workgroupSize;
 		specializationData.chunkSizeFitness = workgroupSize / 2;
 		specializationData.audioWaveFormSize = objective.audioLength;
@@ -318,7 +323,7 @@ private:
 		specializationData.chunkSizeSynth = workgroupSize / specializationData.chunksPerWorkgroupSynth;
 		specializationData.OneOverSampleRateTimeTwoPi = 0.00014247573;
 
-		specializationData.populationSize = population.populationSize * population.numDimensions;
+		specializationData.populationSize = population.populationLength * population.numDimensions;
 	}
 	//@ToDo - Use local memory buffers correctly//
 	void initBuffersVK()
@@ -345,7 +350,6 @@ private:
 		//Create Staging Buffer//
 		stagingBufferSrcSize_ = storageBufferSizes_[inputFFTDataBuffer];
 		stagingBufferDstSize_ = storageBufferSizes_[inputFFTDataBuffer];
-		//localBufferSize_ = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float) * 2;
 
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, stagingBufferSrcSize_, VK_BUFFER_USAGE_TRANSFER_SRC_BIT
 			, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBufferSrc, stagingBufferMemorySrc);
@@ -361,15 +365,15 @@ private:
 		std::uniform_int_distribution<int> distribution(0, 32767);
 		//std::uniform_real_distribution<float> distribution(0.0, 1.0);
 
-		glm::uvec2* rand_state = new glm::uvec2[population.populationSize];
-		for (int i = 0; i < population.populationSize; ++i)
+		glm::uvec2* rand_state = new glm::uvec2[population.populationLength];
+		for (int i = 0; i < population.populationLength; ++i)
 		{
 			rand_state[i].x = distribution(generator);
 			rand_state[i].y = distribution(generator);
 		}
 
 		void* data;
-		uint32_t cpySize = population.populationSize * sizeof(glm::uvec2);
+		uint32_t cpySize = population.populationLength * sizeof(glm::uvec2);
 		vkMapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer], 0, cpySize, 0, &data);
 			memcpy(data, rand_state, static_cast<size_t>(cpySize));
 		vkUnmapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer]);
@@ -910,7 +914,7 @@ private:
 		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
 		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
 		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
-		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationSize);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationLength);
 
 		size_t in_strides[1] = { 1 };
 		size_t out_strides[1] = { 1 };
@@ -919,7 +923,7 @@ private:
 
 		objective.fftOutSize = out_dist * 2;
 		objective.fftHalfSize = 1 << (objective.audioLengthLog2 - 1);
-		storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationLength * objective.fftOutSize * sizeof(float);
 		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);	//objective.fftSizeHalf
 
 		clfftSetPlanInStride(planHandle, dim, in_strides);
@@ -940,18 +944,18 @@ public:
 	uint32_t* rotationIndex_;
 	Evolutionary_Strategy_Vulkan(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
-		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "copyPopulation.spv" })
+		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" })
 	{
 
 	}
 	Evolutionary_Strategy_Vulkan(Evolutionary_Strategy_Vulkan_Arguments args) :
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
-		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "copyPopulation.spv" }),
+		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" }),
 		workgroupX(args.workgroupX),
 		workgroupY(args.workgroupY),
 		workgroupZ(args.workgroupZ),
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
-		globalSize(population.populationSize),
+		globalSize(population.populationLength),
 		numWorkgroupsX(globalSize / workgroupX),
 		numWorkgroupsY(1),
 		numWorkgroupsZ(1),
@@ -966,7 +970,7 @@ public:
 		storageBufferSizes_[outputPopulationFitnessBuffer] = (population.numParents + population.numOffspring) * sizeof(float) * 2;
 		storageBufferSizes_[paramMinBuffer] = population.numDimensions * sizeof(float);
 		storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
-		storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
+		storageBufferSizes_[outputAudioBuffer] = population.populationLength * objective.audioLength * sizeof(float);
 		storageBufferSizes_[rotationIndexBuffer] = sizeof(uint32_t);
 
 		rotationIndex_ = new uint32_t;
@@ -976,8 +980,8 @@ public:
 		initBuffersCL();
 		initCLFFT();
 
-		populationAudioDate = new float[population.populationSize * objective.audioLength];
-		populationFFTData = new float[population.populationSize * objective.fftOutSize];
+		populationAudioDate = new float[population.populationLength * objective.audioLength];
+		populationFFTData = new float[population.populationLength * objective.fftOutSize];
 
 		createInstance();
 		findPhysicalDevice();
@@ -991,15 +995,15 @@ public:
 
 		std::vector<VkPipelineLayout> pipelineLayoutsTemp = { computePipelineLayouts_[initPopulation] };
 		std::vector<VkPipeline> pipelinesTemp = { computePipelines_[initPopulation] };
-		createCommandBuffer(commandPoolInit_, commandBufferInit_, pipelineLayoutsTemp, pipelinesTemp);
+		createCommandBuffer(commandPoolInit_, commandBufferInit_, pipelineLayoutsTemp, pipelinesTemp, &queryPoolInit_);
 
 		pipelineLayoutsTemp = { computePipelineLayouts_[recombinePopulation], computePipelineLayouts_[mutatePopulation], computePipelineLayouts_[synthesisePopulation], computePipelineLayouts_[applyWindowPopulation] };
 		pipelinesTemp = { computePipelines_[recombinePopulation], computePipelines_[mutatePopulation], computePipelines_[synthesisePopulation], computePipelines_[applyWindowPopulation] };
-		createCommandBuffer(commandPoolESOne_, commandBufferESOne_, pipelineLayoutsTemp, pipelinesTemp);
+		createCommandBuffer(commandPoolESOne_, commandBufferESOne_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESOne_);
 
-		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation], computePipelineLayouts_[copyPopulation] };
-		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation], computePipelines_[copyPopulation] };
-		createCommandBuffer(commandPoolESTwo_, commandBufferESTwo_, pipelineLayoutsTemp, pipelinesTemp);
+		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation], computePipelineLayouts_[rotatePopulation] };
+		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation], computePipelines_[rotatePopulation] };
+		createCommandBuffer(commandPoolESTwo_, commandBufferESTwo_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESTwo_);
 
 		//createPopulationInitialiseCommandBuffer();
 		//createESCommandBufferOne();
@@ -1020,7 +1024,7 @@ public:
 
 		//Update member variables with new information//
 		objective.fftOutSize = out_dist * 2;
-		storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationLength * objective.fftOutSize * sizeof(float);
 		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);
 
 		//Setup clFFT//
@@ -1035,7 +1039,7 @@ public:
 		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
 		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
 		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
-		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationSize);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationLength);
 		clfftSetPlanInStride(planHandle, dim, in_strides);
 		clfftSetPlanOutStride(planHandle, dim, out_strides);
 		clfftSetPlanDistance(planHandle, in_dist, out_dist);
@@ -1118,7 +1122,7 @@ public:
 
 	void executeGeneration()
 	{
-		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESOne_);
+		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESOne_); 
 
 		//VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
 		//copyBuffer(storageBuffers_[outputAudioBuffer], stagingBufferDst, storageBufferSizes_[outputAudioBuffer]);
@@ -1148,6 +1152,64 @@ public:
 			//	vkCmdPushConstants(commandBuffer, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
 			////VkCmdPushConstants(commandBufferESOne_, computePipelineLayouts_[0], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
 			//endSingleTimeCommands(commandBuffer);
+
+			uint64_t timestamp[2];
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			uint64_t diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[0] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 0, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[1] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 1, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[2] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 2, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[3] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 3, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[4] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 4, diff / (float)1e6);
+
+			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			//diff = timestamp[1] - timestamp[0];
+			//shaderExecuteTime_[5] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[6] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[7] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[8] += diff / (float)1e6;
+		}
+
+		for (uint32_t i = 0; i != numPipelines_; ++i)
+		{
+			//executeTime = executeTime / numGenerations;
+			std::cout << "Time to complete kernel " << i << ": " << shaderExecuteTime_[i] << "\n";
 		}
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -1282,8 +1344,21 @@ public:
 		copyBuffer(stagingBufferSrc, aBuffer, aSize);
 	}
 
-	void createCommandBuffer(VkCommandPool& aCommandPool, VkCommandBuffer& aCommandBuffer, std::vector<VkPipelineLayout>& aPipelineLayouts, std::vector<VkPipeline>& aPipelines)
+	void createCommandBuffer(VkCommandPool& aCommandPool, VkCommandBuffer& aCommandBuffer, std::vector<VkPipelineLayout>& aPipelineLayouts, std::vector<VkPipeline>& aPipelines, /*std::vector<VkQueryPool>&*/ VkQueryPool aQueryPools[])
 	{
+		//Timestamp initilize//
+		VkQueryPoolCreateInfo createInfo = {};
+		createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+		createInfo.pNext = nullptr;
+		createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		createInfo.queryCount = 2;
+
+		for (uint32_t i = 0; i != aPipelineLayouts.size(); ++i)
+		{
+			VkResult res = vkCreateQueryPool(logicalDevice_, &createInfo, nullptr, &(aQueryPools[i]));
+			assert(res == VK_SUCCESS);
+		}
+
 		/*
 		We are getting closer to the end. In order to send commands to the device(GPU),
 		we must first record commands into a command buffer.
@@ -1317,10 +1392,9 @@ public:
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
 		VK_CHECK_RESULT(vkBeginCommandBuffer(aCommandBuffer, &beginInfo)); // start recording commands.
-
 		for (uint32_t i = 0; i != aPipelineLayouts.size(); ++i)
 		{
-
+			vkCmdResetQueryPool(aCommandBuffer, aQueryPools[i], 0, 2);
 			/*
 			We need to bind a pipeline, AND a descriptor set before we dispatch.
 
@@ -1331,6 +1405,7 @@ public:
 
 			//Include loop and update push constants every iteration//
 			//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[initPopulation], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
+			vkCmdWriteTimestamp(aCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, aQueryPools[i], 0);
 
 			/*
 			Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
@@ -1339,6 +1414,8 @@ public:
 			*/
 			vkCmdDispatch(aCommandBuffer, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
 			vkCmdPipelineBarrier(aCommandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, NULL, 0, NULL, 0, NULL, 0, NULL);
+
+			vkCmdWriteTimestamp(aCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, aQueryPools[i], 1);
 		}
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(aCommandBuffer)); // end recording commands.

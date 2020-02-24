@@ -231,7 +231,7 @@ int main(int argc, char* argv[])
 		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
-		for (int i = 0; i != es->population.populationSize; ++i)
+		for (int i = 0; i != es->population.populationLength; ++i)
 		{
 			//std::cout << i << ": " << (testingValues)[i] << std::endl;
 			//std::cout << i << ": " << (fftAudioData)[i] << std::endl;
@@ -242,8 +242,8 @@ int main(int argc, char* argv[])
 			//std::cout << i << ": " << inputPopulationValues[i + es->population.populationSize * *((Evolutionary_Strategy_Vulkan*)(es))->rotationIndex_] << std::endl;
 		}
 		std::cout << "Input value rotation check." << std::endl;
-		std::cout << inputPopulationValues[es->population.populationSize * 4 * 0] << std::endl;
-		std::cout << inputPopulationValues[es->population.populationSize * 4 * 1] << std::endl;
+		std::cout << inputPopulationValues[es->population.populationLength * 4 * 0] << std::endl;
+		std::cout << inputPopulationValues[es->population.populationLength * 4 * 1] << std::endl;
 		outputAudioFile("gpuOutput.wav", outputAudioData, audioLength*20);	//@ToDo - Why not working?
 		
 		//float params[] = { 500.0f / paramMax[0], 8.0f / paramMax[1], 2500.0f / paramMax[2], 1.0f / paramMax[3] };
