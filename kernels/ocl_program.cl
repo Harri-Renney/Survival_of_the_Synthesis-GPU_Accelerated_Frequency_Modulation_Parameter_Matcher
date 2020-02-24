@@ -163,62 +163,62 @@ __kernel void mutatePopulation(__global float* in_population_values,
 
     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
 	
-	in_population_values[populationStartIndex + index]= MWC64X(&rand_state[index]) /  4294967296.0f;
+	//in_population_values[populationStartIndex + index]= MWC64X(&rand_state[index]) /  4294967296.0f;
 
-    ///* Local arrays to hold a section of the parent population. */
-    //__local float group_steps[NUM_DIMENSIONS * WRKGRPSIZE];     //Need these?
-    //__local float group_values[NUM_DIMENSIONS * WRKGRPSIZE];
-    //
-    ///* Load the population into local memory */
-    //for(int i = 0; i < NUM_DIMENSIONS; i++)
-    //{
-    //    group_steps[WRKGRPSIZE * i + local_index] =
-    //        in_population_steps[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
-    //                            group_index + WRKGRPSIZE * i + local_index)];    //Can the in_population index just be global id?
-    //    group_values[WRKGRPSIZE * i + local_index] =
-    //        in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
-    //                             group_index + WRKGRPSIZE * i + local_index)];
-    //}
-    //
-    ///* Mutation happens here. Each workitem mutates one member of the population */
-    //
-    ///* Randomly choose Ek. If Recombination was more random, it might be worth
-    //using index % 2 as the coin toss. */
-    //
-    //float Ek = ( MWC64X(&rand_state[index]) % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
-    ////float Ek = (index % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
-    //
-    //for(int j = 0; j < NUM_DIMENSIONS; j++)
-    //{
-    //    float s = group_steps[NUM_DIMENSIONS * local_index + j];
-    //    float x = group_values[NUM_DIMENSIONS * local_index + j];
-    //
-    //    float gauss = gauss_rand(&rand_state[index]);
-    //    float new_x = x + Ek * s * gauss;
-    //
-    //    if(new_x < 0.0f || new_x > 1.0f)	//@ToDo - Predicate assingment?
-    //    {
-    //        /* Rather than generating another gaussian random number, simply
-    //        flip it and scale it down. */
-    //        gauss = gauss * -0.5;
-    //        new_x = x + Ek * s * gauss;
-    //    }
-    //
-    //    float Es = (float)exp ( (float)fabs (gauss) - ROOT_TWO_OVER_PI );
-    //    s *= (float)pow((float)Ek, (float)BETA) * (float)pow((float)Es, (float)BETA_SCALE);
-    //
-    //    group_steps[NUM_DIMENSIONS * local_index + j] = s;
-    //    group_values[NUM_DIMENSIONS * local_index + j] = new_x;
-    //}
-    //
-    //// Write back into global memory
-    //for(int i = 0; i < NUM_DIMENSIONS; i++)
-    //{
-    //    in_population_steps[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
-    //        group_steps[WRKGRPSIZE * i + local_index];
-    //    in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
-    //        group_values[WRKGRPSIZE * i + local_index];
-    //}
+    /* Local arrays to hold a section of the parent population. */
+    __local float group_steps[NUM_DIMENSIONS * WRKGRPSIZE];     //Need these?
+    __local float group_values[NUM_DIMENSIONS * WRKGRPSIZE];
+    
+    /* Load the population into local memory */
+    for(int i = 0; i < NUM_DIMENSIONS; i++)
+    {
+        group_steps[WRKGRPSIZE * i + local_index] =
+            in_population_steps[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
+                                group_index + WRKGRPSIZE * i + local_index)];    //Can the in_population index just be global id?
+        group_values[WRKGRPSIZE * i + local_index] =
+            in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
+                                 group_index + WRKGRPSIZE * i + local_index)];
+    }
+    
+    /* Mutation happens here. Each workitem mutates one member of the population */
+    
+    /* Randomly choose Ek. If Recombination was more random, it might be worth
+    using index % 2 as the coin toss. */
+    
+    float Ek = ( MWC64X(&rand_state[index]) % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
+    //float Ek = (index % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
+    
+    for(int j = 0; j < NUM_DIMENSIONS; j++)
+    {
+        float s = group_steps[NUM_DIMENSIONS * local_index + j];
+        float x = group_values[NUM_DIMENSIONS * local_index + j];
+    
+        float gauss = gauss_rand(&rand_state[index]);
+        float new_x = x + Ek * s * gauss;
+    
+        if(new_x < 0.0f || new_x > 1.0f)	//@ToDo - Predicate assingment?
+        {
+            /* Rather than generating another gaussian random number, simply
+            flip it and scale it down. */
+            gauss = gauss * -0.5;
+            new_x = x + Ek * s * gauss;
+        }
+    
+        float Es = (float)exp ( (float)fabs (gauss) - ROOT_TWO_OVER_PI );
+        s *= (float)pow((float)Ek, (float)BETA) * (float)pow((float)Es, (float)BETA_SCALE);
+    
+        group_steps[NUM_DIMENSIONS * local_index + j] = s;
+        group_values[NUM_DIMENSIONS * local_index + j] = new_x;
+    }
+    
+    // Write back into global memory
+    for(int i = 0; i < NUM_DIMENSIONS; i++)
+    {
+        in_population_steps[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
+            group_steps[WRKGRPSIZE * i + local_index];
+        in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
+            group_values[WRKGRPSIZE * i + local_index];
+    }
 }
 
 
@@ -319,7 +319,9 @@ __kernel void mutatePopulation(__global float* in_population_values,
      //out_audio_waves[0] = 1.0;
  }
 
-//@ToDo - wavetable lookup.
+/*------------------------------------------------------------------------------
+    Synthesise - Wavetable lookup improves performance.
+------------------------------------------------------------------------------*/
 //__kernel void synthesisePopulation(__global float* out_audio_waves,
 //                          __global float* in_population_values,
 //                          __constant float* param_mins, __constant float* param_maxs,

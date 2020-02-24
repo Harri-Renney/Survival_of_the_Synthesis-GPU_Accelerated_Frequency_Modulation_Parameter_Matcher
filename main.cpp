@@ -9,6 +9,7 @@
 #include "Evolutionary_Strategy_CPU.hpp"
 #include "Evolutionary_Strategy_Vulkan.hpp"
 #include "Evolutionary_Strategy_OpenCL.hpp"
+#include "Evolutionary_Strategy_CUDA.hpp"
 
 #include "sndfile.h"    //Audio file I/O
 
@@ -36,6 +37,7 @@ int main(int argc, char* argv[])
 		// const char *opt_print_on = "-no-print";
 		// const char *opt_help = "-help";
 
+		//Evolutionary_Strategy_CUDA cudaES();
 
 		//Parse command line arguments//
 		if (argc < 2) {
@@ -146,7 +148,7 @@ int main(int argc, char* argv[])
 			args.workgroupX = j["type"]["Vulkan"]["workgroupSize"];
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
-			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 
 			es = new Evolutionary_Strategy_Vulkan(args);
 		}
