@@ -127,7 +127,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
-			args.deviceType = NVIDIA;
+			args.deviceType = INTEGRATED;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
@@ -146,7 +146,7 @@ int main(int argc, char* argv[])
 			args.workgroupX = j["type"]["Vulkan"]["workgroupSize"];
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
-			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
 
 			es = new Evolutionary_Strategy_Vulkan(args);
 		}
