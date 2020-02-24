@@ -18,6 +18,7 @@
 
 #include "Evolutionary_Strategy.hpp"
 
+
 enum DeviceType { INTEGRATED = 32902, DISCRETE = 4098, NVIDIA = 4318};
 
 struct Evolutionary_Strategy_OpenCL_Arguments
