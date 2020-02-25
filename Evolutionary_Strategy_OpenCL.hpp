@@ -69,6 +69,7 @@ private:
 	uint32_t workgroupSize;
 	uint32_t numWorkgroupsPerParent;
 
+	//Variables for evaluating audio in chunks//
 	uint32_t numChunks_;
 	uint32_t chunkSize_;
 
