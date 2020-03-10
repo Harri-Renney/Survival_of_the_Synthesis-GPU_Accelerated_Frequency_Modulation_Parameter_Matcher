@@ -502,6 +502,12 @@ public:
 				auto diff = end - start;
 				kernelExecuteTime_[idx] += diff;
 			}
+			//else if (idx == sortPopulation)
+			//{
+			//
+			//}
+			//else if (idx == copyPopulation)
+			//{ }
 			//else if (idx == copyPopulation)
 			//{
 			//	std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();

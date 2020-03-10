@@ -133,6 +133,11 @@ public:
 		cudaFree(data);
 	}
 
+	void initPopulationCUDA()
+	{
+
+	}
+
 	void setTargetAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
 	{
 		//Calculate and load fft data for target audio//

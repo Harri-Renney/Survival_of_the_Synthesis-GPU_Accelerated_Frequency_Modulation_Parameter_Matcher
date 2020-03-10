@@ -219,6 +219,11 @@ __kernel void mutatePopulation(__global float* in_population_values,
         in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
             group_values[WRKGRPSIZE * i + local_index];
     }
+	
+	//in_population_values[0] = 0.411931818;
+    //in_population_values[1] = 0.375;
+    //in_population_values[2] = 0.0568181818;
+    //in_population_values[3] = 1.0;
 }
 
 
@@ -474,7 +479,7 @@ __kernel void fitnessPopulation(__global float* out_population_fitnesses, __glob
     int local_index = get_local_id(0);
     int group_index = get_group_id(0);
 
-	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_SIZE / 4;
+	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_COUNT;
 
     float error = 0.0f;
     float tmp;
@@ -541,8 +546,8 @@ __kernel void sortPopulation( __global float* in_population_values, __global flo
     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
     uint newPopulationStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * POPULATION_SIZE;
     
-	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_SIZE / 4;
-    uint newPopulationFitnessStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * (POPULATION_SIZE / 4);
+	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_COUNT;
+    uint newPopulationFitnessStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * POPULATION_COUNT;
 
     __local float group_values[WRKGRPSIZE * NUM_DIMENSIONS];
     __local float group_steps[WRKGRPSIZE * NUM_DIMENSIONS];
@@ -601,6 +606,6 @@ __kernel void copyPopulation(__global float* in_population_values, __global floa
     if(get_global_id(0) == 0)
     {
       //inputPopulationValuePayload[rotationIndexPayload * POPULATION_SIZE] = RotationIndex.rotationIndex + 0.5;
-      rotationIndex[0] = rotationIndex[0] == 0 ? 1 : 0;
+      rotationIndex[0] = (rotationIndex[0] == 0 ? 1 : 0);
     }
 }
