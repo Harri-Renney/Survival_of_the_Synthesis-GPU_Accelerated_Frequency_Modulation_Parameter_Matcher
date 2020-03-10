@@ -15,7 +15,7 @@
 
 using nlohmann::json;
 
-enum class Implementation { None, CPU = 1, OpenCL = 2, Vulkan = 3 };
+enum class Implementation { None, CPU = 1, OpenCL = 2, Vulkan = 3, CUDA = 4};
 enum class InputType { None, Params = 1, Audio = 2 };
 
 static void show_usage(std::string name);
@@ -64,10 +64,12 @@ int main(int argc, char* argv[])
 		Implementation implementation = Implementation::None;
 		if (j["type"]["implementation"] == "CPU")
 			implementation = Implementation::CPU;
-		if (j["type"]["implementation"] == "OpenCL")
+		else if (j["type"]["implementation"] == "OpenCL")
 			implementation = Implementation::OpenCL;
 		else if (j["type"]["implementation"] == "Vulkan")
 			implementation = Implementation::Vulkan;
+		else if (j["type"]["implementation"] == "CUDA")
+			implementation = Implementation::CUDA;
 
 		//Synth matching input type//
 		InputType inputType = InputType::None;
@@ -129,7 +131,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
-			args.deviceType = INTEGRATED;
+			args.deviceType = NVIDIA;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
@@ -151,6 +153,20 @@ int main(int argc, char* argv[])
 			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 
 			es = new Evolutionary_Strategy_Vulkan(args);
+		}
+		if (implementation == Implementation::CUDA)
+		{
+			Evolutionary_Strategy_CUDA_Arguments args;
+			args.es_args.pop.numParents = numParents;
+			args.es_args.pop.numOffspring = numOffspring;
+			args.es_args.pop.numDimensions = numDimensions;
+			args.es_args.numGenerations = numGenerations;
+			args.es_args.paramMin = paramMins;
+			args.es_args.paramMax = paramMaxs;
+			args.es_args.audioLengthLog2 = audioLengthLog2;
+			args.localWorkspace = dim3(j["type"]["Vulkan"]["workgroupSize"], 1, 1);
+
+			es = new Evolutionary_Strategy_CUDA(args);
 		}
 
 		//Initalize evolutionary strategy object and memory//
