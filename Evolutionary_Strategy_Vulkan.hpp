@@ -40,6 +40,7 @@ struct Evolutionary_Strategy_Vulkan_Arguments
 	uint32_t workgroupZ = 1;
 	uint32_t workgroupSize = workgroupX * workgroupY * workgroupZ;
 	uint32_t numWorkgroupsPerParent;
+	VkPhysicalDeviceType deviceType;
 };
 
 struct Specialization_Constants
@@ -104,18 +105,19 @@ private:
 
 	//Physical Device//
 	VkPhysicalDevice physicalDevice_;
+	VkPhysicalDeviceType deviceType_;
 
 	//Logical Device//
 	VkDevice logicalDevice_;
 
 	//Compute Queue//
-	VkQueue computeQueue_; // a queue supporting compute operations.
+	VkQueue computeQueue_;		//A queue supporting compute operations.
 	uint32_t queueFamilyIndex_;
 
 	//Pipeline//
 	//FFT comes inbetween applyWindowPopulation & fitnessPopulation//
 	static const int numPipelines_ = 9;
-	enum computePipelineNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, VulkanFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	enum computePipelineNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, VulkanFFT, fitnessPopulation, sortPopulation, rotatePopulation};
 	std::vector<std::string> shaderNames_;
 	VkPipeline computePipelines_[numPipelines_];
 	VkPipelineLayout computePipelineLayouts_[numPipelines_];
@@ -123,12 +125,17 @@ private:
 	//Command Buffer//
 	VkCommandPool commandPoolInit_;
 	VkCommandBuffer commandBufferInit_;
+	VkQueryPool queryPoolInit_;
 
 	VkCommandPool commandPoolESOne_;
 	VkCommandBuffer commandBufferESOne_;
+	VkQueryPool queryPoolESOne_[5];
 
 	VkCommandPool commandPoolESTwo_;
 	VkCommandBuffer commandBufferESTwo_;
+	VkQueryPool queryPoolESTwo_[3];
+
+	float shaderExecuteTime_[numPipelines_];
 
 	VkCommandPool commandPoolFFT_;
 	VkCommandBuffer commandBufferFFT_;
@@ -138,6 +145,10 @@ private:
 	VkDescriptorPool descriptorPool_;
 	VkDescriptorSet descriptorSet_;
 	VkDescriptorSetLayout descriptorSetLayout_;
+
+	std::vector<VkDescriptorPool> descriptorPools_;
+	std::vector<VkDescriptorSetLayout> descriptorSetLayouts_;
+	std::vector<VkDescriptorSet> descriptorSets_;
 
 	VkDescriptorPool descriptorPoolFFT_;
 	VkDescriptorSet descriptorSetFFT_;
@@ -158,6 +169,20 @@ private:
 	std::array<VkBuffer, numBuffers_> storageBuffers_;
 	std::array<VkDeviceMemory, numBuffers_> storageBuffersMemory_;
 	std::array<uint32_t, numBuffers_> storageBufferSizes_;
+
+	//Staging Buffer//
+	VkQueue bufferQueue;		//A queue for supporting memory buffer operations.
+	VkCommandPool commandPoolStaging_;
+
+	uint32_t stagingBufferSrcSize_;
+	VkBuffer stagingBufferSrc;
+	VkDeviceMemory stagingBufferMemorySrc;
+	void* stagingBufferSrcPointer;
+
+	uint32_t stagingBufferDstSize_;
+	VkBuffer stagingBufferDst;
+	VkDeviceMemory stagingBufferMemoryDst;
+	void* stagingBufferDstPointer;
 
 	//Validation & Debug Variables//
 	VkDebugReportCallbackEXT debugReportCallback_;
@@ -278,7 +303,7 @@ private:
 		specializationData.workgroupZ = workgroupZ;
 		specializationData.workgroupSize = workgroupSize;
 		specializationData.numDimensions = population.numDimensions;
-		specializationData.populationCount = population.populationSize;
+		specializationData.populationCount = population.populationLength;
 		specializationData.numWorkgroupsPerParent = population.numParents / workgroupSize;
 		specializationData.chunkSizeFitness = workgroupSize / 2;
 		specializationData.audioWaveFormSize = objective.audioLength;
@@ -298,14 +323,38 @@ private:
 		specializationData.chunkSizeSynth = workgroupSize / specializationData.chunksPerWorkgroupSynth;
 		specializationData.OneOverSampleRateTimeTwoPi = 0.00014247573;
 
-		specializationData.populationSize = population.populationSize * population.numDimensions;
+		specializationData.populationSize = population.populationLength * population.numDimensions;
 	}
+	//@ToDo - Use local memory buffers correctly//
 	void initBuffersVK()
 	{
-		for (uint32_t i = 0; i != numBuffers_; ++i)
-		{
-			VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, storageBuffers_[i], storageBuffersMemory_[i]);
-		}
+		//Creating each buffer at time//
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationValueBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationValueBuffer], storageBuffersMemory_[inputPopulationValueBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationStepBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationStepBuffer], storageBuffersMemory_[inputPopulationStepBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationFitnessBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationFitnessBuffer], storageBuffersMemory_[inputPopulationFitnessBuffer]);
+		
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputPopulationValueBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[outputPopulationValueBuffer], storageBuffersMemory_[outputPopulationValueBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputPopulationStepBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[outputPopulationStepBuffer], storageBuffersMemory_[outputPopulationStepBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputPopulationFitnessBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[outputPopulationFitnessBuffer], storageBuffersMemory_[outputPopulationFitnessBuffer]);
+		
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputAudioBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer]);
+
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[randomStatesBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[randomStatesBuffer], storageBuffersMemory_[randomStatesBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[paramMinBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[paramMinBuffer], storageBuffersMemory_[paramMinBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[paramMaxBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[paramMaxBuffer], storageBuffersMemory_[paramMaxBuffer]);
+		
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputFFTTargetBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputFFTTargetBuffer], storageBuffersMemory_[inputFFTTargetBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[rotationIndexBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[rotationIndexBuffer], storageBuffersMemory_[rotationIndexBuffer]);
+
+		//Create Staging Buffer//
+		stagingBufferSrcSize_ = storageBufferSizes_[inputFFTDataBuffer];
+		stagingBufferDstSize_ = storageBufferSizes_[inputFFTDataBuffer];
+
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, stagingBufferSrcSize_, VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+			, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBufferSrc, stagingBufferMemorySrc);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, stagingBufferDstSize_, VK_BUFFER_USAGE_TRANSFER_DST_BIT
+			, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBufferDst, stagingBufferMemoryDst);
 	}
 	void initRandomStateBuffer()
 	{
@@ -316,15 +365,15 @@ private:
 		std::uniform_int_distribution<int> distribution(0, 32767);
 		//std::uniform_real_distribution<float> distribution(0.0, 1.0);
 
-		glm::uvec2* rand_state = new glm::uvec2[population.populationSize];
-		for (int i = 0; i < population.populationSize; ++i)
+		glm::uvec2* rand_state = new glm::uvec2[population.populationLength];
+		for (int i = 0; i < population.populationLength; ++i)
 		{
 			rand_state[i].x = distribution(generator);
 			rand_state[i].y = distribution(generator);
 		}
 
 		void* data;
-		uint32_t cpySize = population.populationSize * sizeof(glm::uvec2);
+		uint32_t cpySize = population.populationLength * sizeof(glm::uvec2);
 		vkMapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer], 0, cpySize, 0, &data);
 			memcpy(data, rand_state, static_cast<size_t>(cpySize));
 		vkUnmapMemory(logicalDevice_, storageBuffersMemory_[randomStatesBuffer]);
@@ -426,15 +475,10 @@ private:
 
 	}
 
+	//@ToDo - Correctly find the AMD GPU, not use intel one.//
 	void findPhysicalDevice()
 	{
-		/*
-		In this function, we find a physical device that can be used with Vulkan.
-		*/
-
-		/*
-		So, first we will list all physical devices on the system with vkEnumeratePhysicalDevices .
-		*/
+		//Collect physical devices available to VUlkan//
 		uint32_t deviceCount;
 		vkEnumeratePhysicalDevices(instance_, &deviceCount, NULL);
 		if (deviceCount == 0) {
@@ -444,32 +488,21 @@ private:
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
 
-		/*
-		Next, we choose a device that can be used for our purposes.
-
-		With VkPhysicalDeviceFeatures(), we can retrieve a fine-grained list of physical features supported by the device.
-		However, in this demo, we are simply launching a simple compute shader, and there are no
-		special physical features demanded for this task.
-
-		With VkPhysicalDeviceProperties(), we can obtain a list of physical device properties. Most importantly,
-		we obtain a list of physical device limitations. For this application, we launch a compute shader,
-		and the maximum size of the workgroups and total number of compute shader invocations is limited by the physical device,
-		and we should ensure that the limitations named maxComputeWorkGroupCount, maxComputeWorkGroupInvocations and
-		maxComputeWorkGroupSize are not exceeded by our application.  Moreover, we are using a storage buffer in the compute shader,
-		and we should ensure that it is not larger than the device can handle, by checking the limitation maxStorageBufferRange.
-
-		However, in our application, the workgroup size and total number of shader invocations is relatively small, and the storage buffer is
-		not that large, and thus a vast majority of devices will be able to handle it. This can be verified by looking at some devices at_
-		http://vulkan.gpuinfo.org/
-
-		Therefore, to keep things simple and clean, we will not perform any such checks here, and just pick the first physical
-		device in the list. But in a real and serious application, those limitations should certainly be taken into account.
-
-		*/
+		//Iterate through and choose appropriate device//
 		for (VkPhysicalDevice device : devices) {
 			if (true) { // As above stated, we do no feature checks, so just accept.
-				physicalDevice_ = device;
-				break;
+				VkPhysicalDeviceProperties deviceProperties;
+				VkPhysicalDeviceFeatures deviceFeatures;
+				vkGetPhysicalDeviceProperties(device, &deviceProperties);
+				vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+				printf("Device found: %s\n", deviceProperties.deviceName);
+				printf("Device maxDescriptorSetStorageBuffers: %d\n", deviceProperties.limits.maxDescriptorSetStorageBuffers);
+		
+				if(deviceProperties.deviceType == deviceType_)
+				{
+					physicalDevice_ = device;
+					break;
+				}
 			}
 		}
 	}
@@ -809,211 +842,15 @@ private:
 			std::cout << "Created shader: " << fileName.c_str() << std::endl;
 		}
 	}
-	void createPopulationInitialiseCommandBuffer()
+	void createCopyCommandPool()
 	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
 		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
 		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		commandPoolCreateInfo.flags = 0;
 		// the queue family of this command pool. All command buffers allocated from this command pool,
 		// must be submitted to queues of this family ONLY. 
 		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolInit_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolInit_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferInit_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferInit_, &beginInfo)); // start recording commands.
-
-		/*
-		We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-		The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-		*/
-		vkCmdBindDescriptorSets(commandBufferInit_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[initPopulation], 0, 1, &descriptorSet_, 0, NULL);
-		vkCmdBindPipeline(commandBufferInit_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[initPopulation]);
-		
-		//Include loop and update push constants every iteration//
-		//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[initPopulation], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-		/*
-		Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-		The number of workgroups is specified in the arguments.
-		If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-		*/
-		vkCmdDispatch(commandBufferInit_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferInit_)); // end recording commands.
-	}
-	void createESCommandBufferOne()
-	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
-		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		commandPoolCreateInfo.flags = 0;
-		// the queue family of this command pool. All command buffers allocated from this command pool,
-		// must be submitted to queues of this family ONLY. 
-		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolESOne_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolESOne_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferESOne_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferESOne_, &beginInfo)); // start recording commands.
-
-		for (uint8_t i = recombinePopulation; i != VulkanFFT; ++i)
-		{
-			if (i == VulkanFFT)
-			{
-			}
-			//else if (i == recombinePopulation) {}
-			//else if (i == mutatePopulation) {}
-			//else if (i == synthesisePopulation) {}
-			//else if(i == sortPopulation) {}
-			//else if (i == copyPopulation) {}
-			//else if (i == applyWindowPopulation) {}
-			//else if (i == fitnessPopulation) {}
-			else
-			{
-				/*
-				We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-				The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-				*/
-				vkCmdBindDescriptorSets(commandBufferESOne_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[i], 0, 1, &descriptorSet_, 0, NULL);
-				vkCmdBindPipeline(commandBufferESOne_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[i]);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-				/*
-				Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-				The number of workgroups is specified in the arguments.
-				If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-				*/
-				vkCmdDispatch(commandBufferESOne_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
-			}
-		}
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferESOne_)); // end recording commands.
-	}
-	void createESCommandBufferTwo()
-	{
-		/*
-		We are getting closer to the end. In order to send commands to the device(GPU),
-		we must first record commands into a command buffer.
-		To allocate a command buffer, we must first create a command pool. So let us do that.
-		*/
-		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		commandPoolCreateInfo.flags = 0;
-		// the queue family of this command pool. All command buffers allocated from this command pool,
-		// must be submitted to queues of this family ONLY. 
-		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolESTwo_));
-
-		/*
-		Now allocate a command buffer from the command pool.
-		*/
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		commandBufferAllocateInfo.commandPool = commandPoolESTwo_; // specify the command pool to allocate from. 
-		// if the command buffer is primary, it can be directly submitted to queues. 
-		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
-		// submitted to a queue. To keep things simple, we use a primary command buffer. 
-		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &commandBufferESTwo_)); // allocate command buffer.
-
-		/*
-		Now we shall start recording commands into the newly allocated command buffer.
-		*/
-		VkCommandBufferBeginInfo beginInfo = {};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
-		VK_CHECK_RESULT(vkBeginCommandBuffer(commandBufferESTwo_, &beginInfo)); // start recording commands.
-
-		for (uint8_t i = fitnessPopulation; i != numPipelines_; ++i)
-		{
-			if (i == VulkanFFT)
-			{
-			}
-			//else if (i == recombinePopulation) {}
-			//else if (i == mutatePopulation) {}
-			//else if (i == synthesisePopulation) {}
-			//else if(i == sortPopulation) {}
-			//else if (i == copyPopulation) {}
-			//else if (i == applyWindowPopulation) {}
-			//else if (i == fitnessPopulation) {}
-			else
-			{
-				/*
-				We need to bind a pipeline, AND a descriptor set before we dispatch.
-
-				The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
-				*/
-				vkCmdBindDescriptorSets(commandBufferESTwo_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayouts_[i], 0, 1, &descriptorSet_, 0, NULL);
-				vkCmdBindPipeline(commandBufferESTwo_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines_[i]);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
-
-				/*
-				Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
-				The number of workgroups is specified in the arguments.
-				If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
-				*/
-				vkCmdDispatch(commandBufferESTwo_, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
-
-				//Include loop and update push constants every iteration//
-				//vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
-			}
-		}
-
-		VK_CHECK_RESULT(vkEndCommandBuffer(commandBufferESTwo_)); // end recording commands.
+		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &commandPoolStaging_));
 	}
 	void calculateAudioFFT()
 	{
@@ -1077,7 +914,7 @@ private:
 		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
 		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
 		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
-		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationSize);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationLength);
 
 		size_t in_strides[1] = { 1 };
 		size_t out_strides[1] = { 1 };
@@ -1086,7 +923,7 @@ private:
 
 		objective.fftOutSize = out_dist * 2;
 		objective.fftHalfSize = 1 << (objective.audioLengthLog2 - 1);
-		storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationLength * objective.fftOutSize * sizeof(float);
 		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);	//objective.fftSizeHalf
 
 		clfftSetPlanInStride(planHandle, dim, in_strides);
@@ -1102,46 +939,29 @@ private:
 	{
 		inputBuffer = cl::Buffer(context_, CL_MEM_READ_WRITE, storageBufferSizes_[outputAudioBuffer]);
 		outputBuffer = cl::Buffer(context_, CL_MEM_READ_WRITE, storageBufferSizes_[inputFFTDataBuffer]);
-
-		//Write intial data to buffers @ToDO - Do elsewhere//
-		//commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMinBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMins.data());
-		//commandQueue_.enqueueWriteBuffer(storageBuffers_[paramMaxBuffer], CL_TRUE, 0, population.numDimensions * sizeof(float), objective.paramMaxs.data());
-		//for (uint8_t i = 0; i != numBuffers_; ++i)
-		//	storageBuffers_[i] = cl::Buffer(context_, memoryFlags, storageBufferSizes_[i]);
 	}
 public:
 	uint32_t* rotationIndex_;
 	Evolutionary_Strategy_Vulkan(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
-		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "copyPopulation.spv" })
+		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" })
 	{
 
 	}
 	Evolutionary_Strategy_Vulkan(Evolutionary_Strategy_Vulkan_Arguments args) :
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
-		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "copyPopulation.spv" }),
+		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" }),
 		workgroupX(args.workgroupX),
 		workgroupY(args.workgroupY),
 		workgroupZ(args.workgroupZ),
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
-		globalSize(population.populationSize),
+		globalSize(population.populationLength),
 		numWorkgroupsX(globalSize / workgroupX),
 		numWorkgroupsY(1),
 		numWorkgroupsZ(1),
-		chunkSizeFitness(workgroupSize / 2)
-
+		chunkSizeFitness(workgroupSize / 2),
+		deviceType_(args.deviceType)
 	{
-		//for (int i = 0; i != paramMinBuffer; ++i)
-		//	storageBufferSizes_[i] = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float);
-		//
-		//storageBufferSizes_[paramMinBuffer] = population.numDimensions * sizeof(float);
-		//storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
-		//storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
-		//
-		////After .fftOutSize worked out//
-		//storageBufferSizes_[inputFFTDataBuffer] = population.populationSize * objective.fftOutSize * sizeof(float);
-		//storageBufferSizes_[inputFFTTargetBuffer] = objective.fftOutSize * sizeof(float);	//objective.fftSizeHalf
-
 		for (int i = 0; i != randomStatesBuffer; ++i)
 			storageBufferSizes_[i] = (population.numParents + population.numOffspring) * population.numDimensions * sizeof(float) * 2;
 
@@ -1150,17 +970,18 @@ public:
 		storageBufferSizes_[outputPopulationFitnessBuffer] = (population.numParents + population.numOffspring) * sizeof(float) * 2;
 		storageBufferSizes_[paramMinBuffer] = population.numDimensions * sizeof(float);
 		storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
-		storageBufferSizes_[outputAudioBuffer] = population.populationSize * objective.audioLength * sizeof(float);
+		storageBufferSizes_[outputAudioBuffer] = population.populationLength * objective.audioLength * sizeof(float);
 		storageBufferSizes_[rotationIndexBuffer] = sizeof(uint32_t);
 
 		rotationIndex_ = new uint32_t;
 		*rotationIndex_ = 0;
 
-		initContextCL(0, 0);
+		initContextCL(1, 0);
 		initBuffersCL();
+		initCLFFT();
 
-		populationAudioDate = new float[population.populationSize * objective.audioLength];
-		populationFFTData = new float[population.populationSize * objective.fftOutSize];
+		populationAudioDate = new float[population.populationLength * objective.audioLength];
+		populationFFTData = new float[population.populationLength * objective.fftOutSize];
 
 		createInstance();
 		findPhysicalDevice();
@@ -1170,15 +991,72 @@ public:
 		createDescriptorSet();
 		initConstantsVK();
 		createComputePipelines();
-		createPopulationInitialiseCommandBuffer();
-		createESCommandBufferOne();
-		createESCommandBufferTwo();
+		createCopyCommandPool();
+
+		std::vector<VkPipelineLayout> pipelineLayoutsTemp = { computePipelineLayouts_[initPopulation] };
+		std::vector<VkPipeline> pipelinesTemp = { computePipelines_[initPopulation] };
+		createCommandBuffer(commandPoolInit_, commandBufferInit_, pipelineLayoutsTemp, pipelinesTemp, &queryPoolInit_);
+
+		pipelineLayoutsTemp = { computePipelineLayouts_[recombinePopulation], computePipelineLayouts_[mutatePopulation], computePipelineLayouts_[synthesisePopulation], computePipelineLayouts_[applyWindowPopulation] };
+		pipelinesTemp = { computePipelines_[recombinePopulation], computePipelines_[mutatePopulation], computePipelines_[synthesisePopulation], computePipelines_[applyWindowPopulation] };
+		createCommandBuffer(commandPoolESOne_, commandBufferESOne_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESOne_);
+
+		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation], computePipelineLayouts_[rotatePopulation] };
+		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation], computePipelines_[rotatePopulation] };
+		createCommandBuffer(commandPoolESTwo_, commandBufferESTwo_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESTwo_);
+
+		//createPopulationInitialiseCommandBuffer();
+		//createESCommandBufferOne();
+		//createESCommandBufferTwo();
 		initRandomStateBuffer();
-		writeParamData((void*)objective.paramMins.data(), (void*)objective.paramMaxs.data());
+		writeLocalBuffer(storageBuffers_[paramMinBuffer], 4 * sizeof(float), (void*)objective.paramMins.data());
+		writeLocalBuffer(storageBuffers_[paramMaxBuffer], 4 * sizeof(float), (void*)objective.paramMaxs.data());
+	}
+	void initCLFFT()
+	{
+		//clFFT Variables//
+		clfftDim dim = CLFFT_1D;
+		size_t clLengths[1] = { objective.audioLength };
+		size_t in_strides[1] = { 1 };
+		size_t out_strides[1] = { 1 };
+		size_t in_dist = (size_t)objective.audioLength;
+		size_t out_dist = (size_t)objective.audioLength / 2 + 4;
+
+		//Update member variables with new information//
+		objective.fftOutSize = out_dist * 2;
+		storageBufferSizes_[inputFFTDataBuffer] = population.populationLength * objective.fftOutSize * sizeof(float);
+		storageBufferSizes_[inputFFTTargetBuffer] = objective.fftHalfSize * sizeof(float);
+
+		//Setup clFFT//
+		clfftSetupData fftSetup;
+		errorStatus_ = clfftInitSetupData(&fftSetup);
+		errorStatus_ = clfftSetup(&fftSetup);
+
+		//Create a default plan for a complex FFT//
+		errorStatus_ = clfftCreateDefaultPlan(&planHandle, context_(), dim, clLengths);
+
+		//Set plan parameters//
+		errorStatus_ = clfftSetPlanPrecision(planHandle, CLFFT_SINGLE);
+		errorStatus_ = clfftSetLayout(planHandle, CLFFT_REAL, CLFFT_HERMITIAN_INTERLEAVED);
+		errorStatus_ = clfftSetResultLocation(planHandle, CLFFT_OUTOFPLACE);
+		errorStatus_ = clfftSetPlanBatchSize(planHandle, (size_t)population.populationLength);
+		clfftSetPlanInStride(planHandle, dim, in_strides);
+		clfftSetPlanOutStride(planHandle, dim, out_strides);
+		clfftSetPlanDistance(planHandle, in_dist, out_dist);
+
+		//Bake clFFT plan//
+		errorStatus_ = clfftBakePlan(planHandle, 1, &commandQueue_(), NULL, NULL);
+		if (errorStatus_)
+			std::cout << "ERROR creating clFFT plan. Status code: " << errorStatus_ << std::endl;
 	}
 	void writePopulationData()
 	{
 
+	}
+	void readTestingData(void* aTestingData, size_t aTestingDataSize)
+	{
+		copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBufferDst, aTestingDataSize);
+		VKHelper::readBuffer(logicalDevice_, aTestingDataSize, stagingBufferMemoryDst, aTestingData);
 	}
 	void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
 	{
@@ -1188,6 +1066,21 @@ public:
 		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, storageBuffersMemory_[outputPopulationStepBuffer], aOutputPopulationStepData);
 		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[inputPopulationFitnessBuffer], aInputPopulationFitnessData);
 		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[outputPopulationFitnessBuffer], aOutputPopulationFitnessData);
+	}
+	void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
+	{
+		copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemoryDst, aInputPopulationValueData);
+		copyBuffer(storageBuffers_[outputPopulationValueBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemoryDst, aOutputPopulationValueData);
+		copyBuffer(storageBuffers_[inputPopulationStepBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemoryDst, aInputPopulationStepData);
+		copyBuffer(storageBuffers_[outputPopulationStepBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemoryDst, aOutputPopulationStepData);
+		copyBuffer(storageBuffers_[inputPopulationFitnessBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemoryDst, aInputPopulationFitnessData);
+		copyBuffer(storageBuffers_[outputPopulationFitnessBuffer], stagingBufferDst, aPopulationValueSize);
+		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemoryDst, aOutputPopulationFitnessData);
 	}
 
 	void writeSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
@@ -1229,11 +1122,25 @@ public:
 
 	void executeGeneration()
 	{
-		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESOne_);
-		VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
+		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESOne_); 
+
+		//VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
+		//copyBuffer(storageBuffers_[outputAudioBuffer], stagingBufferDst, storageBufferSizes_[outputAudioBuffer]);
+		//VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], stagingBufferMemoryDst, populationAudioDate);
+		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
+		readLocalBuffer(storageBuffers_[outputAudioBuffer], storageBufferSizes_[outputAudioBuffer], populationAudioDate);
+		
+
 		calculateAudioFFT();	//@ToDo - Work out how to calculate FFT for GPU acceptable format.
-		VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
-		VKHelper::readBuffer(logicalDevice_, objective.fftOutSize * population.numDimensions * sizeof(float), storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
+
+		writeLocalBuffer(storageBuffers_[inputFFTDataBuffer], storageBufferSizes_[inputFFTDataBuffer], populationFFTData);
+		auto end = std::chrono::steady_clock::now();
+		auto diff = end - start;
+		shaderExecuteTime_[5] += diff.count() / (float)1e6;
+		//VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], stagingBufferMemorySrc, populationAudioDate);
+		//copyBuffer(stagingBufferSrc, storageBuffers_[outputAudioBuffer], storageBufferSizes_[outputAudioBuffer]);
+		//VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
+
 		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESTwo_);
 	}
 	void executeAllGenerations()
@@ -1250,7 +1157,68 @@ public:
 			//	vkCmdPushConstants(commandBuffer, computePipelineLayouts_[i], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
 			////VkCmdPushConstants(commandBufferESOne_, computePipelineLayouts_[0], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
 			//endSingleTimeCommands(commandBuffer);
+
+			uint64_t timestamp[2];
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			uint64_t diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[0] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 0, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[1] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 1, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[2] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 2, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[3] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 3, diff / (float)1e6);
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[4] += diff / (float)1e6;
+			//printf("Timestamp information [%d]: %f\n", 4, diff / (float)1e6);
+
+			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
+			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			//diff = timestamp[1] - timestamp[0];
+			//shaderExecuteTime_[5] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[6] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[7] += diff / (float)1e6;
+
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			diff = timestamp[1] - timestamp[0];
+			shaderExecuteTime_[8] += diff / (float)1e6;
 		}
+
+		float totalKernelRunTime = 0.0;
+		for (uint32_t i = 0; i != numPipelines_; ++i)
+		{
+			//executeTime = executeTime / numGenerations;
+			std::cout << "Time to complete kernel " << i << ": " << shaderExecuteTime_[i] << "ms\n";
+			totalKernelRunTime += shaderExecuteTime_[i];
+		}
+		std::cout << "Time to complete all kernels for this run: " << totalKernelRunTime << "ms\n";
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
 	{
@@ -1262,8 +1230,7 @@ public:
 			setTargetAudio(&aTargetAudio[i*chunkSize], chunkSize);
 			initPopulationVK();
 			uint32_t rI = 0;
-			VKHelper::writeBuffer(logicalDevice_, sizeof(uint32_t), storageBuffersMemory_[rotationIndexBuffer], &rI);
-			//initRandomStateBuffer();
+			VKHelper::writeBuffer(logicalDevice_, sizeof(uint32_t), storageBuffersMemory_[rotationIndexBuffer], &rI);	//Need this?
 			executeAllGenerations();
 
 			uint32_t tempSize = 4 * sizeof(float);
@@ -1272,32 +1239,10 @@ public:
 			VKHelper::readBuffer(logicalDevice_, tempSize, storageBuffersMemory_[inputPopulationValueBuffer], tempData);
 			VKHelper::readBuffer(logicalDevice_, sizeof(float), storageBuffersMemory_[inputPopulationFitnessBuffer], &tempFitness);
 			printf("Generation %d parameters:\n Param0 = %f\n Param1 = %f\n Param2 = %f\n Param3 = %f\nFitness=%f\n\n\n", i, tempData[0] * 3520.0, tempData[1] * 8.0, tempData[2] * 3520.0, tempData[3] * 1.0, tempFitness);
-
-			//initPopulationCL();
-			// Get pointers to the correct chunk location in the audio and param buffers
-			//float* audioChunk = &(targetAudio[i * chunkSize]);
-			//float *params_out_start = &(params_out[i * es.population->num_dimensions]);
-
-			// Perform the evolution and reset the population
-			//time_one = evolve(&es, params_out_start, audio_in_chunk_start, options);
 		}
 	}
 	void executeOpenCLFFT()
 	{
-		//clFFT//
-		//clfftEnqueueTransform(fftPlan, CLFFT_FORWARD, 1, &(commandQueue_.getDefault()), 0,
-		//	NULL, NULL, storageBuffers_[outputAudioBuffer], storageBuffers_[inputFFTDataBuffer], NULL);
-
-		//clFFTpp//
-		//clFFT.forward(storageBuffers_[outputAudioBuffer].get(), isInPlace ? NULL : storageBuffers_[inputFFTDataBuffer].get(), 0, 0, 0);
-		//cl_mem* inputBuff = &storageBuffers_[outputAudioBuffer]();
-		//cl_mem* outputBuff = &storageBuffers_[inputFFTDataBuffer]();
-		//clFFT.forward(inputBuff, outputBuff, 0, 0, 0);	//@ToDo - Why clFFT not working. Possibly a wrong sized buffer read/written to?
-		//clFinish(commandQueue_());
-
-
-		//VKHelper::readBuffer(logicalDevice_, objective.audioLength * population.numDimensions * sizeof(float), storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
-
 		commandQueue_.enqueueWriteBuffer(inputBuffer, CL_TRUE, 0, storageBufferSizes_[outputAudioBuffer], populationAudioDate);
 
 		/* Execute the plan. */
@@ -1305,21 +1250,6 @@ public:
 		commandQueue_.finish();
 
 		commandQueue_.enqueueReadBuffer(outputBuffer, CL_TRUE, 0, storageBufferSizes_[inputFFTDataBuffer], populationFFTData);
-
-		//VKHelper::writeBuffer(logicalDevice_, objective.fftOutSize * population.numDimensions * sizeof(float), storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
-
-		//uint32_t dataSize = 1000;output
-		//float* data = new float[1000];
-		//commandQueue_.enqueueReadBuffer(storageBuffers_[inputFFTDataBuffer], CL_TRUE, 0, dataSize, data);
-
-		//for (uint32_t i = 0; i != 1000; ++i)
-		//	std::cout << i << ": " << data[i] << std::endl;
-
-		//double* X = new double[100];
-		//clEnqueueReadBuffer(commandQueue_.get(), outBuf, CL_TRUE, 0, 100, X, 0, 0, 0);
-		//for (int i = 0; i != 100; ++i)
-		//	std::cout << i << ": " << X[i] << std::endl;
-		//storageBuffers_[inputFFTDataBuffer] = outBuf;
 	}
 
 	void setTargetAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -1345,7 +1275,7 @@ public:
 		VkCommandBufferAllocateInfo allocInfo = {};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandPool = commandPoolInit_;			//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+		allocInfo.commandPool = commandPoolStaging_;			//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
 		allocInfo.commandBufferCount = 1;
 
 		VkCommandBuffer commandBuffer;
@@ -1374,7 +1304,129 @@ public:
 		vkQueueWaitIdle(computeQueue_);
 
 		//Cleanup used comand pool//
-		vkFreeCommandBuffers(logicalDevice_, commandPoolInit_, 1, &aCommandBuffer);	//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+		vkFreeCommandBuffers(logicalDevice_, commandPoolStaging_, 1, &aCommandBuffer);	//@ToDo - Is this okay to be renderCommandPool only? Or need one for each??
+	}
+
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+	{
+		VkCommandBufferAllocateInfo allocInfo = {};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandPool = commandPoolStaging_;
+		allocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer commandBuffer;
+		vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer);
+
+		VkCommandBufferBeginInfo beginInfo = {};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+			VkBufferCopy copyRegion = {};
+			copyRegion.srcOffset = 0; // Optional
+			copyRegion.dstOffset = 0; // Optional
+			copyRegion.size = size;
+			vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+		vkEndCommandBuffer(commandBuffer);
+
+		VkSubmitInfo submitInfo = {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(computeQueue_);
+
+		vkFreeCommandBuffers(logicalDevice_, commandPoolStaging_, 1, &commandBuffer);
+	}
+
+	void readLocalBuffer(VkBuffer aBuffer, uint32_t aSize, void* aOutput)
+	{
+		copyBuffer(aBuffer, stagingBufferDst, aSize);
+		VKHelper::readBuffer(logicalDevice_, aSize, stagingBufferMemoryDst, aOutput);
+	}
+	void writeLocalBuffer(VkBuffer aBuffer, uint32_t aSize, void* aInput)
+	{
+		VKHelper::writeBuffer(logicalDevice_, aSize, stagingBufferMemorySrc, aInput);
+		copyBuffer(stagingBufferSrc, aBuffer, aSize);
+	}
+
+	void createCommandBuffer(VkCommandPool& aCommandPool, VkCommandBuffer& aCommandBuffer, std::vector<VkPipelineLayout>& aPipelineLayouts, std::vector<VkPipeline>& aPipelines, /*std::vector<VkQueryPool>&*/ VkQueryPool aQueryPools[])
+	{
+		//Timestamp initilize//
+		VkQueryPoolCreateInfo createInfo = {};
+		createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+		createInfo.pNext = nullptr;
+		createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		createInfo.queryCount = 2;
+
+		for (uint32_t i = 0; i != aPipelineLayouts.size(); ++i)
+		{
+			VkResult res = vkCreateQueryPool(logicalDevice_, &createInfo, nullptr, &(aQueryPools[i]));
+			assert(res == VK_SUCCESS);
+		}
+
+		/*
+		We are getting closer to the end. In order to send commands to the device(GPU),
+		we must first record commands into a command buffer.
+		To allocate a command buffer, we must first create a command pool. So let us do that.
+		*/
+		VkCommandPoolCreateInfo commandPoolCreateInfo = {};
+		commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		commandPoolCreateInfo.flags = 0;
+		// the queue family of this command pool. All command buffers allocated from this command pool,
+		// must be submitted to queues of this family ONLY. 
+		commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
+		VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice_, &commandPoolCreateInfo, NULL, &aCommandPool));
+
+		/*
+		Now allocate a command buffer from the command pool.
+		*/
+		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
+		commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		commandBufferAllocateInfo.commandPool = aCommandPool; // specify the command pool to allocate from. 
+		// if the command buffer is primary, it can be directly submitted to queues. 
+		// A secondary buffer has to be called from some primary command buffer, and cannot be directly 
+		// submitted to a queue. To keep things simple, we use a primary command buffer. 
+		commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		commandBufferAllocateInfo.commandBufferCount = 1; // allocate a single command buffer. 
+		VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice_, &commandBufferAllocateInfo, &aCommandBuffer)); // allocate command buffer.
+
+		/*
+		Now we shall start recording commands into the newly allocated command buffer.
+		*/
+		VkCommandBufferBeginInfo beginInfo = {};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT; // the buffer is only submitted and used once in this application.
+		VK_CHECK_RESULT(vkBeginCommandBuffer(aCommandBuffer, &beginInfo)); // start recording commands.
+		for (uint32_t i = 0; i != aPipelineLayouts.size(); ++i)
+		{
+			vkCmdResetQueryPool(aCommandBuffer, aQueryPools[i], 0, 2);
+			/*
+			We need to bind a pipeline, AND a descriptor set before we dispatch.
+
+			The validation layer will NOT give warnings if you forget these, so be very careful not to forget them.
+			*/
+			vkCmdBindDescriptorSets(aCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, aPipelineLayouts[i], 0, 1, &descriptorSet_, 0, NULL);
+			vkCmdBindPipeline(aCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, aPipelines[i]);
+
+			//Include loop and update push constants every iteration//
+			//vkCmdPushConstants(commandBufferInit_, computePipelineLayouts_[initPopulation], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), rotationIndex_);
+			vkCmdWriteTimestamp(aCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, aQueryPools[i], 0);
+
+			/*
+			Calling vkCmdDispatch basically starts the compute pipeline, and executes the compute shader.
+			The number of workgroups is specified in the arguments.
+			If you are already familiar with compute shaders from OpenGL, this should be nothing new to you.
+			*/
+			vkCmdDispatch(aCommandBuffer, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ);
+			vkCmdPipelineBarrier(aCommandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, NULL, 0, NULL, 0, NULL, 0, NULL);
+
+			vkCmdWriteTimestamp(aCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, aQueryPools[i], 1);
+		}
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(aCommandBuffer)); // end recording commands.
 	}
 };
 

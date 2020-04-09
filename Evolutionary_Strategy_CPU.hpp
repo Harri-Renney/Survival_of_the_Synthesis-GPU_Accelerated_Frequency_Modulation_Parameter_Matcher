@@ -62,6 +62,9 @@ private:
 	float* targetAudio;
 	std::vector<float> targetFFT_;
 
+	static const uint8_t numKernels_ = 9;
+	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, CPUFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
 
 	void initRandomStates()
 	{
@@ -79,7 +82,7 @@ private:
 			randomStates_[i].y = distribution(generator);
 		}
 	}
-	void initPopulation()
+	void initPopulationCPU()
 	{
 		unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 		std::default_random_engine generator(seed);
@@ -246,8 +249,8 @@ public:
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2)
 	{
 		//randomStates_.resize(population.populationSize);
-		initRandomStates();
-		initPopulation();
+		//initRandomStates();
+		//initPopulationCPU();
 
 		audioData_.resize(population.populationSize * objective.audioLength);
 		fftAudioData_.resize(population.populationSize * objective.fftHalfSize);
@@ -293,18 +296,55 @@ public:
 	//Execute evolutionary algorithm//
 	void executeGeneration()
 	{
+		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
+
 		recombine();
+
+		auto end = std::chrono::steady_clock::now();
+		auto diff = end - start;
+		kernelExecuteTime_[recombinePopulation] += diff;
+		
+		start = std::chrono::steady_clock::now();
+
 		mutate();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[mutatePopulation] += diff;
+
+		start = std::chrono::steady_clock::now();
+		
 		synthesis();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[synthesisePopulation] += diff;
+
 		//outputAudioFileTwo("testio.wav", &audioData_[0], objective.audioLength);
+
+		start = std::chrono::steady_clock::now();
 		fitness();
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[fitnessPopulation] += diff;
+
+		start = std::chrono::steady_clock::now();
 		sort();
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[sortPopulation] += diff;
 	}
 	void executeAllGenerations()
 	{
 		for (uint32_t i = 0; i != numGenerations; ++i)
 		{
 			executeGeneration();
+		}
+		for (uint32_t i = 0; i != numKernels_; ++i)
+		{
+			std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
+			//executeTime = executeTime / numGenerations;
+			std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
 		}
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -313,11 +353,12 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		initRandomStates();
 		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
-			initPopulation();
+			initPopulationCPU();
 
 			//Execute number of ES generations on chunk//
 			executeAllGenerations();

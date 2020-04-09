@@ -150,57 +150,57 @@ void main()
    //for(int i = 0; i < NUM_DIMENSIONS; i++)
    //{
    //    group_steps[WRKGRPSIZE * i + tid] =
-   //        inputPopulationValuePayload[WRKGRPSIZE * NUM_DIMENSIONS *
-   //                            wid + WRKGRPSIZE * i + tid];
+   //        inputPopulationValuePayload[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
+   //                            wid + WRKGRPSIZE * i + tid)];
    //    group_values[WRKGRPSIZE * i + tid] =
-   //        inputPopulationStepPayload[WRKGRPSIZE * NUM_DIMENSIONS *
-   //                             wid + WRKGRPSIZE * i + tid];
+   //        inputPopulationStepPayload[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
+   //                             wid + WRKGRPSIZE * i + tid)];
    //}
-
+   //
    ///* Mutation happens here. Each workitem mutates one member of the population */
-
+   //
    ///* Randomly choose Ek. If Recombination was more random, it might be worth
    //using index % 2 as the coin toss. */
-
+   //
    ////int randomInt = int((random(randomStatesPayload[gid]) * 2) * 2147483647);
    //float Ek = ( MWC64X(randomStatesPayload[gid]) % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
    ////float Ek = ( randomInt % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
    ////float Ek = (gid % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
-
+   //
    //for(int j = 0; j < NUM_DIMENSIONS; j++)
    //{
    //    float s = group_steps[NUM_DIMENSIONS * tid + j];
    //    float x = group_values[NUM_DIMENSIONS * tid + j];
-
+   //
    //    //float gauss = MWC64X(randomStatesPayload[gid]) /  4294967296.0f;
    //    float gauss = randomGaussian(randomStatesPayload[gid]);
    //    float new_x = x + Ek * s * gauss;
-
+   //
    //    if(new_x < 0.0f || new_x > 1.0f)
    //    {
    //        /* Rather than generating another gaussian random number, simply
    //        flip it and scale it down. */
    //        gauss = gauss * -0.5;
-   //        //new_x = x + Ek * s * gauss;
+   //        new_x = x + Ek * s * gauss;
    //        //new_x = MWC64X(randomStatesPayload[gid]) /  4294967296.0f;
-   //        new_x = randomGaussian(randomStatesPayload[gid]);
+   //        //new_x = randomGaussian(randomStatesPayload[gid]);
    //    }
-
+   //
    //    float Ps = abs (gauss) - ROOT_TWO_OVER_PI;
    //    float Es = exp ( Ps );
    //    s *= pow(Ek, BETA) * pow(Es, BETA_SCALE);
-
+   //
    //    group_steps[NUM_DIMENSIONS * tid + j] = s;
    //    group_values[NUM_DIMENSIONS * tid + j] = new_x;
    //}
    //group_values[NUM_DIMENSIONS * tid + 3] = 1.0;
-
+   //
    //// Write back into global memory
    //for(int i = 0; i < NUM_DIMENSIONS; i++)
    //{
-   //    inputPopulationStepPayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid] =
+   //    inputPopulationStepPayload[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid)] =
    //        group_steps[WRKGRPSIZE * i + tid];
-   //    inputPopulationValuePayload[WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid] =
+   //    inputPopulationValuePayload[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * wid + WRKGRPSIZE * i + tid)] =
    //        group_values[WRKGRPSIZE * i + tid];
    //}
 

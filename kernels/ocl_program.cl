@@ -2,7 +2,7 @@
  *  Random number generator
  *  source: http://cas.ee.ic.ac.uk/people/dt10/research/rngs-gpu-mwc64x.html
  */
-inline uint MWC64X(__global uint2* const state)
+inline uint MWC64X(__global uint2* state)
 {
     enum _dummy { A=4294883355U };
     //unsigned int A = 4294883355U ;
@@ -18,7 +18,7 @@ inline uint MWC64X(__global uint2* const state)
 /**
     http://c-faq.com/lib/gaussian.html
 */
-inline float gauss_rand(__global uint2* const rand_state)
+inline float gauss_rand(__global uint2* rand_state)
 {
     float sum = 0.0f;
     int tmp_rand;
@@ -30,7 +30,7 @@ inline float gauss_rand(__global uint2* const rand_state)
     return sum;
 }
 
-float random (const float2 state)
+float random(const float2 state)
 {
     float floor = 0.f;
     return fract(sin(dot(state.xy, (float2)(12.9898,78.233)))* 43758.5453123,&floor);
@@ -162,11 +162,13 @@ __kernel void mutatePopulation(__global float* in_population_values,
     int group_index = get_group_id(0);
 
     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
+	
+	//in_population_values[populationStartIndex + index]= MWC64X(&rand_state[index]) /  4294967296.0f;
 
     /* Local arrays to hold a section of the parent population. */
     __local float group_steps[NUM_DIMENSIONS * WRKGRPSIZE];     //Need these?
     __local float group_values[NUM_DIMENSIONS * WRKGRPSIZE];
-
+    
     /* Load the population into local memory */
     for(int i = 0; i < NUM_DIMENSIONS; i++)
     {
@@ -177,23 +179,23 @@ __kernel void mutatePopulation(__global float* in_population_values,
             in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS *
                                  group_index + WRKGRPSIZE * i + local_index)];
     }
-
+    
     /* Mutation happens here. Each workitem mutates one member of the population */
-
+    
     /* Randomly choose Ek. If Recombination was more random, it might be worth
     using index % 2 as the coin toss. */
-
+    
     float Ek = ( MWC64X(&rand_state[index]) % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
     //float Ek = (index % 2 == 0) ? ALPHA : ONE_OVER_ALPHA;
-
+    
     for(int j = 0; j < NUM_DIMENSIONS; j++)
     {
         float s = group_steps[NUM_DIMENSIONS * local_index + j];
         float x = group_values[NUM_DIMENSIONS * local_index + j];
-
+    
         float gauss = gauss_rand(&rand_state[index]);
         float new_x = x + Ek * s * gauss;
-
+    
         if(new_x < 0.0f || new_x > 1.0f)	//@ToDo - Predicate assingment?
         {
             /* Rather than generating another gaussian random number, simply
@@ -201,14 +203,14 @@ __kernel void mutatePopulation(__global float* in_population_values,
             gauss = gauss * -0.5;
             new_x = x + Ek * s * gauss;
         }
-
+    
         float Es = (float)exp ( (float)fabs (gauss) - ROOT_TWO_OVER_PI );
         s *= (float)pow((float)Ek, (float)BETA) * (float)pow((float)Es, (float)BETA_SCALE);
-
+    
         group_steps[NUM_DIMENSIONS * local_index + j] = s;
         group_values[NUM_DIMENSIONS * local_index + j] = new_x;
     }
-
+    
     // Write back into global memory
     for(int i = 0; i < NUM_DIMENSIONS; i++)
     {
@@ -217,6 +219,11 @@ __kernel void mutatePopulation(__global float* in_population_values,
         in_population_values[populationStartIndex + (WRKGRPSIZE * NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)] =
             group_values[WRKGRPSIZE * i + local_index];
     }
+	
+	//in_population_values[0] = 0.411931818;
+    //in_population_values[1] = 0.375;
+    //in_population_values[2] = 0.0568181818;
+    //in_population_values[3] = 1.0;
 }
 
 
@@ -236,204 +243,206 @@ __kernel void mutatePopulation(__global float* in_population_values,
 /* Constant used for FM synthesis */
 #define ONE_OVER_SAMPLE_RATE_TIMES_2_PI 0.00014247573
 
-// __kernel void synthesisePopulation(__global float* out_audio_waves,
-//                           __global float* in_population_values,
-//                           __constant float* param_mins, __constant float* param_maxs,
-//                                      __global uint* rotationIndex)
-// {
-//     int index = get_global_id(0);
-//     int local_index = get_local_id(0);
-//     int group_index = get_group_id(0);
+ __kernel void synthesisePopulation(__global float* out_audio_waves,
+                           __global float* in_population_values,
+                           __constant float* param_mins, __constant float* param_maxs,
+                                      __global uint* rotationIndex)
+ {
+     int index = get_global_id(0);
+     int local_index = get_local_id(0);
+     int group_index = get_group_id(0);
 
-//     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
+     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
 
-//     const int pop_index = local_index * NUM_DIMENSIONS;
-//     float params_scaled[4];
+     const int pop_index = local_index * NUM_DIMENSIONS;
+     float params_scaled[4];
 
-//     //@ToDo - This looks like it laods all population value into local memory, calculates all values scaling, but only synthesises the first/one audio wave from first set of params?
+     //@ToDo - This looks like it laods all population value into local memory, calculates all values scaling, but only synthesises the first/one audio wave from first set of params?
 
-//     /* Fill a local array with population values, 1 per workitem */
-//     __local float group_population_values[WRKGRPSIZE * NUM_DIMENSIONS];
-//     for(int i = 0; i < NUM_DIMENSIONS; i++)
-//     {
-//         group_population_values[WRKGRPSIZE * i + local_index] = in_population_values[populationStartIndex + (WRKGRPSIZE *
-//                 NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)];
-//     }
+     /* Fill a local array with population values, 1 per workitem */
+     __local float group_population_values[WRKGRPSIZE * NUM_DIMENSIONS];
+     for(int i = 0; i < NUM_DIMENSIONS; i++)
+     {
+         group_population_values[WRKGRPSIZE * i + local_index] = in_population_values[populationStartIndex + (WRKGRPSIZE *
+                 NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)];
+     }
 
-//     /* Scale the synthesis parameters */
-//     for(int i = 0; i < NUM_DIMENSIONS; i++)
-//     {
-//         params_scaled[i] = param_mins[i] + group_population_values[pop_index + i] *
-//                            (param_maxs[i] - param_mins[i]);
-//     }
+     /* Scale the synthesis parameters */
+     for(int i = 0; i < NUM_DIMENSIONS; i++)
+     {
+         params_scaled[i] = param_mins[i] + group_population_values[pop_index + i] *
+                            (param_maxs[i] - param_mins[i]);
+     }
 
-//     float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
-//     float carrierFreq  = params_scaled[2];
-//     float carrierAmp = params_scaled[3];
+     float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
+     float carrierFreq  = params_scaled[2];
+     float carrierAmp = params_scaled[3];
 
-//     /* Use the wavetable positions to track where we are at each frame of synthesis. */
-//     float wave_table_pos_1 = 0.0f;
-//     float wave_table_pos_2 = 0.0f;
+     /* Use the wavetable positions to track where we are at each frame of synthesis. */
+     float wave_table_pos_1 = 0.0f;
+     float wave_table_pos_2 = 0.0f;
 
-//     float cur_sample;
+     float cur_sample;
 
-//     /* Local array to hold the current chunk of output for each work item */
-//     __local float audio_chunks[WRKGRPSIZE * CHUNK_SIZE_SYNTH];  //Need this? Again, another needless loop required to load back from group to global mem?
+     /* Local array to hold the current chunk of output for each work item */
+     __local float audio_chunks[WRKGRPSIZE * CHUNK_SIZE_SYNTH];  //Need this? Again, another needless loop required to load back from group to global mem?
 
-//     int local_id_mod_chunk = local_index % CHUNK_SIZE_SYNTH;
+     int local_id_mod_chunk = local_index % CHUNK_SIZE_SYNTH;
 
-//     /* As the chunk size can be smaller than the workgroup size, we need to know which chunk this work item operates on. */
-//     int local_chunk_index = local_index / CHUNK_SIZE_SYNTH;
+     /* As the chunk size can be smaller than the workgroup size, we need to know which chunk this work item operates on. */
+     int local_chunk_index = local_index / CHUNK_SIZE_SYNTH;
 
-//     /* Current index to write back to global memory coelesced. Initialise for the first iteration. */
-//     int out_index = (AUDIO_WAVE_FORM_SIZE * (WRKGRPSIZE * group_index + local_chunk_index)) +
-//                     local_id_mod_chunk;
+     /* Current index to write back to global memory coelesced. Initialise for the first iteration. */
+     int out_index = (AUDIO_WAVE_FORM_SIZE * (WRKGRPSIZE * group_index + local_chunk_index)) +
+                     local_id_mod_chunk;
 
-//     /* Perform synthesis in chunks as a single waveform output can be very long.
-//      * In each iteration of this outer loop, each work item synthesises a chunk of the wave then the work group
-//      * writes back to global memory */
-//     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE / CHUNK_SIZE_SYNTH; i++)
-//     {
-//         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-//         {
-//             cur_sample = sin(wave_table_pos_1 * ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * modIdxMulModFreq +
-//                          carrierFreq;
-//             audio_chunks[local_index * CHUNK_SIZE_SYNTH + j] = sin(wave_table_pos_2 *
-//                     ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * carrierAmp;
-//             wave_table_pos_1 += params_scaled[0];
-//             wave_table_pos_2 += cur_sample;
+     /* Perform synthesis in chunks as a single waveform output can be very long.
+      * In each iteration of this outer loop, each work item synthesises a chunk of the wave then the work group
+      * writes back to global memory */
+     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE / CHUNK_SIZE_SYNTH; i++)
+     {
+         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
+         {
+             cur_sample = sin(wave_table_pos_1 * ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * modIdxMulModFreq +
+                          carrierFreq;
+             audio_chunks[local_index * CHUNK_SIZE_SYNTH + j] = sin(wave_table_pos_2 *
+                     ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * carrierAmp;
+             wave_table_pos_1 += params_scaled[0];
+             wave_table_pos_2 += cur_sample;
 
 
-//         }
-//         int out_index_local = local_chunk_index * CHUNK_SIZE_SYNTH + local_id_mod_chunk;
-//         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-//         {
-//             out_audio_waves[out_index] = audio_chunks[out_index_local];
-//             out_index += CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE;
-//             out_index_local += CHUNKS_PER_WG_SYNTH * CHUNK_SIZE_SYNTH;
-//         }
-//         out_index -= (CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE - 1) *  CHUNK_SIZE_SYNTH;
-//     }
-//     //out_audio_waves[0] = 1.0;
-// }
+         }
+         int out_index_local = local_chunk_index * CHUNK_SIZE_SYNTH + local_id_mod_chunk;
+         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
+         {
+             out_audio_waves[out_index] = audio_chunks[out_index_local];
+             out_index += CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE;
+             out_index_local += CHUNKS_PER_WG_SYNTH * CHUNK_SIZE_SYNTH;
+         }
+         out_index -= (CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE - 1) *  CHUNK_SIZE_SYNTH;
+     }
+     //out_audio_waves[0] = 1.0;
+ }
 
-//@ToDo - wavetable lookup.
-__kernel void synthesisePopulation(__global float* out_audio_waves,
-                          __global float* in_population_values,
-                          __constant float* param_mins, __constant float* param_maxs,
-                                     __global uint* rotationIndex, __global float* wavetable)
-{
-    int index = get_global_id(0);
-    int local_index = get_local_id(0);
-    int group_index = get_group_id(0);
-
-    uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
-
-    const int pop_index = local_index * NUM_DIMENSIONS;
-    float params_scaled[4];
-
-    //@ToDo - This looks like it laods all population value into local memory, calculates all values scaling, but only synthesises the first/one audio wave from first set of params?
-
-    /* Fill a local array with population values, 1 per workitem */
-    __local float group_population_values[WRKGRPSIZE * NUM_DIMENSIONS];
-    for(int i = 0; i < NUM_DIMENSIONS; i++)
-    {
-        group_population_values[WRKGRPSIZE * i + local_index] = in_population_values[populationStartIndex + (WRKGRPSIZE *
-                NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)];
-    }
-
-    /* Scale the synthesis parameters */
-    for(int i = 0; i < NUM_DIMENSIONS; i++)
-    {
-        params_scaled[i] = param_mins[i] + group_population_values[pop_index + i] *
-                           (param_maxs[i] - param_mins[i]);
-    }
-
-    float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
-    float carrierFreq  = params_scaled[2];
-    float carrierAmp = params_scaled[3];
-
-    /* Use the wavetable positions to track where we are at each frame of synthesis. */
-    float wave_table_pos_1 = 0.0f;
-    float wave_table_pos_2 = 0.0f;
-
-    float cur_sample;
-
-    /* Local array to hold the current chunk of output for each work item */
-    __local float audio_chunks[WRKGRPSIZE * CHUNK_SIZE_SYNTH];  //Need this? Again, another needless loop required to load back from group to global mem?
-
-    int local_id_mod_chunk = local_index % CHUNK_SIZE_SYNTH;
-
-    /* As the chunk size can be smaller than the workgroup size, we need to know which chunk this work item operates on. */
-    int local_chunk_index = local_index / CHUNK_SIZE_SYNTH;
-
-    /* Current index to write back to global memory coelesced. Initialise for the first iteration. */
-    int out_index = (AUDIO_WAVE_FORM_SIZE * (WRKGRPSIZE * group_index + local_chunk_index)) +
-                    local_id_mod_chunk;
-
-    const float wavetableIncrementOne = (WAVETABLE_SIZE / 44100.0) * params_scaled[0];
-
-    // for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
-    // {
-    //     cur_sample = wavetable[(int)wave_table_pos_1] * modIdxMulModFreq + carrierFreq;
-    //     wave_table_pos_1 += wavetableIncrementOne;
-    //     if (wave_table_pos_1 >= WAVETABLE_SIZE) {
-    //         wave_table_pos_1 -= WAVETABLE_SIZE;
-    //     }
-    //     //if (wave_table_pos_1 < 0.0f) {
-    //     //	wave_table_pos_1 += WAVETABLE_SIZE;
-    //     //}
-
-    //     out_audio_waves[index * AUDIO_WAVE_FORM_SIZE + i] = wavetable[(int)wave_table_pos_2] * carrierAmp;
-    //     wave_table_pos_2 += (WAVETABLE_SIZE / 44100.0) * cur_sample;
-
-    //     if (wave_table_pos_2 >= WAVETABLE_SIZE) {
-    //         wave_table_pos_2 -= WAVETABLE_SIZE;
-    //     }
-
-    //     if (wave_table_pos_2 < 0.0f) {
-    //         wave_table_pos_2 += WAVETABLE_SIZE;
-    //     }
-    // }
-                    
-    /* Perform synthesis in chunks as a single waveform output can be very long.
-     * In each iteration of this outer loop, each work item synthesises a chunk of the wave then the work group
-     * writes back to global memory */
-    for(int i = 0; i < AUDIO_WAVE_FORM_SIZE / CHUNK_SIZE_SYNTH; i++)
-    {
-        for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-        {
-            cur_sample = wavetable[(int)wave_table_pos_1] * modIdxMulModFreq + carrierFreq;
-            wave_table_pos_1 += wavetableIncrementOne;
-            if (wave_table_pos_1 >= WAVETABLE_SIZE) {
-				wave_table_pos_1 -= WAVETABLE_SIZE;
-			}
-            //if (wave_table_pos_1 < 0.0f) {
-			//	wave_table_pos_1 += WAVETABLE_SIZE;
-			//}
-
-            audio_chunks[local_index * CHUNK_SIZE_SYNTH + j] = wavetable[(int)wave_table_pos_2] * carrierAmp;
-            wave_table_pos_2 += (WAVETABLE_SIZE / 44100.0) * cur_sample;
-
-            if (wave_table_pos_2 >= WAVETABLE_SIZE) {
-				wave_table_pos_2 -= WAVETABLE_SIZE;
-			}
-
-			if (wave_table_pos_2 < 0.0f) {
-				wave_table_pos_2 += WAVETABLE_SIZE;
-			}
-        }
-        int out_index_local = local_chunk_index * CHUNK_SIZE_SYNTH + local_id_mod_chunk;
-        for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-        {
-            out_audio_waves[out_index] = audio_chunks[out_index_local];
-            out_index += CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE;
-            out_index_local += CHUNKS_PER_WG_SYNTH * CHUNK_SIZE_SYNTH;
-        }
-        out_index -= (CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE - 1) *  CHUNK_SIZE_SYNTH;
-    }
-    //out_audio_waves[1] = wavetable[5];
-}
+/*------------------------------------------------------------------------------
+    Synthesise - Wavetable lookup improves performance.
+------------------------------------------------------------------------------*/
+//__kernel void synthesisePopulation(__global float* out_audio_waves,
+//                          __global float* in_population_values,
+//                          __constant float* param_mins, __constant float* param_maxs,
+//                                     __global uint* rotationIndex, __global float* wavetable)
+//{
+//    int index = get_global_id(0);
+//    int local_index = get_local_id(0);
+//    int group_index = get_group_id(0);
+//
+//    uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
+//
+//    const int pop_index = local_index * NUM_DIMENSIONS;
+//    float params_scaled[4];
+//
+//    //@ToDo - This looks like it laods all population value into local memory, calculates all values scaling, but only synthesises the first/one audio wave from first set of params?
+//
+//    /* Fill a local array with population values, 1 per workitem */
+//    __local float group_population_values[WRKGRPSIZE * NUM_DIMENSIONS];
+//    for(int i = 0; i < NUM_DIMENSIONS; i++)
+//    {
+//        group_population_values[WRKGRPSIZE * i + local_index] = in_population_values[populationStartIndex + (WRKGRPSIZE *
+//                NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)];
+//    }
+//
+//    /* Scale the synthesis parameters */
+//    for(int i = 0; i < NUM_DIMENSIONS; i++)
+//    {
+//        params_scaled[i] = param_mins[i] + group_population_values[pop_index + i] *
+//                           (param_maxs[i] - param_mins[i]);
+//    }
+//
+//    float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
+//    float carrierFreq  = params_scaled[2];
+//    float carrierAmp = params_scaled[3];
+//
+//    /* Use the wavetable positions to track where we are at each frame of synthesis. */
+//    float wave_table_pos_1 = 0.0f;
+//    float wave_table_pos_2 = 0.0f;
+//
+//    float cur_sample;
+//
+//    /* Local array to hold the current chunk of output for each work item */
+//    __local float audio_chunks[WRKGRPSIZE * CHUNK_SIZE_SYNTH];  //Need this? Again, another needless loop required to load back from group to global mem?
+//
+//    int local_id_mod_chunk = local_index % CHUNK_SIZE_SYNTH;
+//
+//    /* As the chunk size can be smaller than the workgroup size, we need to know which chunk this work item operates on. */
+//    int local_chunk_index = local_index / CHUNK_SIZE_SYNTH;
+//
+//    /* Current index to write back to global memory coelesced. Initialise for the first iteration. */
+//    int out_index = (AUDIO_WAVE_FORM_SIZE * (WRKGRPSIZE * group_index + local_chunk_index)) +
+//                    local_id_mod_chunk;
+//
+//    const float wavetableIncrementOne = (WAVETABLE_SIZE / 44100.0) * params_scaled[0];
+//
+//    // for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
+//    // {
+//    //     cur_sample = wavetable[(int)wave_table_pos_1] * modIdxMulModFreq + carrierFreq;
+//    //     wave_table_pos_1 += wavetableIncrementOne;
+//    //     if (wave_table_pos_1 >= WAVETABLE_SIZE) {
+//    //         wave_table_pos_1 -= WAVETABLE_SIZE;
+//    //     }
+//    //     //if (wave_table_pos_1 < 0.0f) {
+//    //     //	wave_table_pos_1 += WAVETABLE_SIZE;
+//    //     //}
+//
+//    //     out_audio_waves[index * AUDIO_WAVE_FORM_SIZE + i] = wavetable[(int)wave_table_pos_2] * carrierAmp;
+//    //     wave_table_pos_2 += (WAVETABLE_SIZE / 44100.0) * cur_sample;
+//
+//    //     if (wave_table_pos_2 >= WAVETABLE_SIZE) {
+//    //         wave_table_pos_2 -= WAVETABLE_SIZE;
+//    //     }
+//
+//    //     if (wave_table_pos_2 < 0.0f) {
+//    //         wave_table_pos_2 += WAVETABLE_SIZE;
+//    //     }
+//    // }
+//                    
+//    /* Perform synthesis in chunks as a single waveform output can be very long.
+//     * In each iteration of this outer loop, each work item synthesises a chunk of the wave then the work group
+//     * writes back to global memory */
+//    for(int i = 0; i < AUDIO_WAVE_FORM_SIZE / CHUNK_SIZE_SYNTH; i++)
+//    {
+//        for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
+//        {
+//            cur_sample = wavetable[(int)wave_table_pos_1] * modIdxMulModFreq + carrierFreq;
+//            wave_table_pos_1 += wavetableIncrementOne;
+//            if (wave_table_pos_1 >= WAVETABLE_SIZE) {
+//				wave_table_pos_1 -= WAVETABLE_SIZE;
+//			}
+//            //if (wave_table_pos_1 < 0.0f) {
+//			//	wave_table_pos_1 += WAVETABLE_SIZE;
+//			//}
+//
+//            audio_chunks[local_index * CHUNK_SIZE_SYNTH + j] = wavetable[(int)wave_table_pos_2] * carrierAmp;
+//            wave_table_pos_2 += (WAVETABLE_SIZE / 44100.0) * cur_sample;
+//
+//            if (wave_table_pos_2 >= WAVETABLE_SIZE) {
+//				wave_table_pos_2 -= WAVETABLE_SIZE;
+//			}
+//
+//			if (wave_table_pos_2 < 0.0f) {
+//				wave_table_pos_2 += WAVETABLE_SIZE;
+//			}
+//        }
+//        int out_index_local = local_chunk_index * CHUNK_SIZE_SYNTH + local_id_mod_chunk;
+//        for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
+//        {
+//            out_audio_waves[out_index] = audio_chunks[out_index_local];
+//            out_index += CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE;
+//            out_index_local += CHUNKS_PER_WG_SYNTH * CHUNK_SIZE_SYNTH;
+//        }
+//        out_index -= (CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE - 1) *  CHUNK_SIZE_SYNTH;
+//    }
+//    //out_audio_waves[1] = wavetable[5];
+//}
 
 
 
@@ -450,9 +459,12 @@ __kernel void applyWindowPopulation(__global float* audio_waves)
     float mu = ( FFT_ONE_OVER_SIZE - 1) * 2.0f * M_PI;
     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
     {
-        float fft_window_sample = (1.0 - cos((float)(index % AUDIO_WAVE_FORM_SIZE) * mu));
-        audio_waves[index] = fft_window_sample * audio_waves[index];
-        index += POPULATION_COUNT;
+		float fft_window_sample = 1.0 - cos(i  * mu);
+        audio_waves[index*AUDIO_WAVE_FORM_SIZE+i] = fft_window_sample * audio_waves[index*AUDIO_WAVE_FORM_SIZE+i];
+		
+        //float fft_window_sample = (1.0 - cos((float)(index % AUDIO_WAVE_FORM_SIZE) * mu));
+        //audio_waves[index] = fft_window_sample * audio_waves[index];
+        //index += POPULATION_COUNT;
     }
 }
 
@@ -470,7 +482,7 @@ __kernel void fitnessPopulation(__global float* out_population_fitnesses, __glob
     int local_index = get_local_id(0);
     int group_index = get_group_id(0);
 
-	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_SIZE / 4;
+	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_COUNT;
 
     float error = 0.0f;
     float tmp;
@@ -537,8 +549,8 @@ __kernel void sortPopulation( __global float* in_population_values, __global flo
     uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
     uint newPopulationStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * POPULATION_SIZE;
     
-	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_SIZE / 4;
-    uint newPopulationFitnessStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * (POPULATION_SIZE / 4);
+	uint populationFitnessStartIndex = rotationIndex[0] * POPULATION_COUNT;
+    uint newPopulationFitnessStartIndex = (rotationIndex[0] == 0 ? 1 : 0) * POPULATION_COUNT;
 
     __local float group_values[WRKGRPSIZE * NUM_DIMENSIONS];
     __local float group_steps[WRKGRPSIZE * NUM_DIMENSIONS];
@@ -597,6 +609,6 @@ __kernel void copyPopulation(__global float* in_population_values, __global floa
     if(get_global_id(0) == 0)
     {
       //inputPopulationValuePayload[rotationIndexPayload * POPULATION_SIZE] = RotationIndex.rotationIndex + 0.5;
-      rotationIndex[0] = rotationIndex[0] == 0 ? 1 : 0;
+      rotationIndex[0] = (rotationIndex[0] == 0 ? 1 : 0);
     }
 }

@@ -9,12 +9,13 @@
 #include "Evolutionary_Strategy_CPU.hpp"
 #include "Evolutionary_Strategy_Vulkan.hpp"
 #include "Evolutionary_Strategy_OpenCL.hpp"
+#include "Evolutionary_Strategy_CUDA.hpp"
 
 #include "sndfile.h"    //Audio file I/O
 
 using nlohmann::json;
 
-enum class Implementation { None, CPU = 1, OpenCL = 2, Vulkan = 3 };
+enum class Implementation { None, CPU = 1, OpenCL = 2, Vulkan = 3, CUDA = 4};
 enum class InputType { None, Params = 1, Audio = 2 };
 
 static void show_usage(std::string name);
@@ -36,6 +37,7 @@ int main(int argc, char* argv[])
 		// const char *opt_print_on = "-no-print";
 		// const char *opt_help = "-help";
 
+		//Evolutionary_Strategy_CUDA cudaES();
 
 		//Parse command line arguments//
 		if (argc < 2) {
@@ -62,10 +64,12 @@ int main(int argc, char* argv[])
 		Implementation implementation = Implementation::None;
 		if (j["type"]["implementation"] == "CPU")
 			implementation = Implementation::CPU;
-		if (j["type"]["implementation"] == "OpenCL")
+		else if (j["type"]["implementation"] == "OpenCL")
 			implementation = Implementation::OpenCL;
 		else if (j["type"]["implementation"] == "Vulkan")
 			implementation = Implementation::Vulkan;
+		else if (j["type"]["implementation"] == "CUDA")
+			implementation = Implementation::CUDA;
 
 		//Synth matching input type//
 		InputType inputType = InputType::None;
@@ -127,6 +131,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
+			args.deviceType = NVIDIA;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
@@ -145,8 +150,23 @@ int main(int argc, char* argv[])
 			args.workgroupX = j["type"]["Vulkan"]["workgroupSize"];
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
+			args.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 
 			es = new Evolutionary_Strategy_Vulkan(args);
+		}
+		if (implementation == Implementation::CUDA)
+		{
+			Evolutionary_Strategy_CUDA_Arguments args;
+			args.es_args.pop.numParents = numParents;
+			args.es_args.pop.numOffspring = numOffspring;
+			args.es_args.pop.numDimensions = numDimensions;
+			args.es_args.numGenerations = numGenerations;
+			args.es_args.paramMin = paramMins;
+			args.es_args.paramMax = paramMaxs;
+			args.es_args.audioLengthLog2 = audioLengthLog2;
+			args.localWorkspace = dim3(j["type"]["Vulkan"]["workgroupSize"], 1, 1);
+
+			es = new Evolutionary_Strategy_CUDA(args);
 		}
 
 		//Initalize evolutionary strategy object and memory//
@@ -225,12 +245,11 @@ int main(int argc, char* argv[])
 		//esOpenCL.executeFitness();
 		//esOpenCL.executeSynthesise();
 
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize, inputPopulationSteps, outputPopulationSteps, populationStepSize, inputPopulationFitness, outputPopulationFitness, populationFitnessSize);
 		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
-		for (int i = 0; i != es->population.populationSize; ++i)
+		for (int i = 0; i != es->population.populationLength; ++i)
 		{
 			//std::cout << i << ": " << (testingValues)[i] << std::endl;
 			//std::cout << i << ": " << (fftAudioData)[i] << std::endl;
@@ -241,8 +260,8 @@ int main(int argc, char* argv[])
 			//std::cout << i << ": " << inputPopulationValues[i + es->population.populationSize * *((Evolutionary_Strategy_Vulkan*)(es))->rotationIndex_] << std::endl;
 		}
 		std::cout << "Input value rotation check." << std::endl;
-		std::cout << inputPopulationValues[es->population.populationSize * 4 * 0] << std::endl;
-		std::cout << inputPopulationValues[es->population.populationSize * 4 * 1] << std::endl;
+		std::cout << inputPopulationValues[es->population.populationLength * 4 * 0] << std::endl;
+		std::cout << inputPopulationValues[es->population.populationLength * 4 * 1] << std::endl;
 		outputAudioFile("gpuOutput.wav", outputAudioData, audioLength*20);	//@ToDo - Why not working?
 		
 		//float params[] = { 500.0f / paramMax[0], 8.0f / paramMax[1], 2500.0f / paramMax[2], 1.0f / paramMax[3] };

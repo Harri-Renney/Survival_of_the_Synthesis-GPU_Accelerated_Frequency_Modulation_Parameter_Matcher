@@ -1,0 +1,9 @@
+*.spv
+*.wav
+include
+lib
+x64
+*.dll
+*.vcxproj
+*.filters
+*.user

@@ -120,7 +120,7 @@ void main()
     uint wid = gl_WorkGroupID.x;
 
     uint populationStartIndex = rotationIndexPayload * POPULATION_SIZE;
-    uint populationFitnessStartIndex = rotationIndexPayload * (POPULATION_SIZE/4);
+    uint populationFitnessStartIndex = rotationIndexPayload * POPULATION_COUNT;
 
     float error = 0.0f;
     float tmp;
