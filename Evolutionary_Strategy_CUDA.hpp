@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cufft.h>
+#include <iostream>
 
 #include "Evolutionary_Strategy.hpp"
 
@@ -64,7 +65,6 @@ private:
 
 	//CUDA Device Buffers//
 	uint32_t targetFFTSize;
-	float* devicetargetFFT;
 
 	float* devicePopulationValueBuffer_;
 	float* devicePopulationStepBuffer_;
@@ -87,19 +87,24 @@ private:
 	cudaEvent_t cudaEventEnd;
 	float cudaTimeElapsed = 0.0f;
 
+	static const uint8_t numKernels_ = 9;
+	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, cudaFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
 public:
 	Evolutionary_Strategy_CUDA(Evolutionary_Strategy_CUDA_Arguments args) :
 	Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
 	kernelSourcePath_(args.kernelSourcePath),
-	globalWorkspace_(args.globalWorkspace),
+	globalWorkspace_(dim3(population.populationLength, 1, 1)),
 	localWorkspace_(args.localWorkspace)
 	{
 		//Set sizes//
-		targetFFTSize = objective.fftHalfSize * sizeof(float);
+		//targetFFTSize = objective.fftHalfSize * sizeof(float);
 
 		//Create device buffers//
-		cudaMalloc((void**)&devicetargetFFT, targetFFTSize);
+		//cudaMalloc((void**)&devicetargetFFT, targetFFTSize);
 		
+		initCudaFFT();
+		init();
 	}
 
 	void init()
@@ -117,6 +122,10 @@ public:
 
 		targetFFT_ = new float[objective.fftHalfSize];
 
+		//Load parameter min & max//
+		cudaMemcpy(deviceParamMinBuffer_, &objective.paramMins.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(deviceParamMaxBuffer_, &objective.paramMaxs.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
+
 		initDeviceMemory();
 	}
 	void initDeviceMemory()
@@ -124,11 +133,11 @@ public:
 		//What needed in here?
 	}
 
-	void cudaFFT()
+	void initCudaFFT()
 	{
-		const int BATCH = 10;	//Population Size?
+		const int BATCH = population.populationLength;
 		const int RANK = 1;
-		int NX = 256;
+		int NX = objective.audioLength;
 
 		//clFFT Variables//
 		//clfftDim dim = CLFFT_1D;
@@ -143,15 +152,17 @@ public:
 		cudaMalloc((void**)&deviceGeneratedFFTBuffer_, population.populationLength * objective.fftOutSize * sizeof(float));
 		cudaMalloc((void**)&deviceTargetFFTBuffer_, objective.fftHalfSize * sizeof(float));
 
-		cufftHandle plan;
-		cufftComplex *data;
-		cudaMalloc((void**)&data, sizeof(cufftComplex)*NX*BATCH);
 		//cufftPlanMany(&plan, RANK, &NX, NULL, NULL, in_dist,NULL, NULL, out_dist, CUFFT_R2C, BATCH);
-		cufftPlanMany(&plan, RANK, &NX, NULL, *in_strides, in_dist, NULL, *out_strides, out_dist, CUFFT_R2C, BATCH);	//@ToDo - Need to check this works, as is not hermitian_interleaved as in ClFFT? Just real to complex?
-		cufftExecC2C(plan, data, data, CUFFT_FORWARD);
+		//cufftPlanMany(&fftplan_, RANK, &NX, NULL, *in_strides, in_dist, NULL, *out_strides, out_dist, CUFFT_R2C, BATCH);	//@ToDo - Need to check this works, as is not hermitian_interleaved as in ClFFT? Just real to complex?
+		cufftPlan1d(&fftplan_, NX, CUFFT_R2C, BATCH);
+	}
+	cufftHandle fftplan_;
+	void executeCudaFFT()
+	{
+		cufftExecR2C(fftplan_, deviceGeneratedAudioBuffer_, reinterpret_cast<cufftComplex *>(deviceGeneratedFFTBuffer_));
 		cudaDeviceSynchronize();
-		cufftDestroy(plan);
-		cudaFree(data);
+		//cufftDestroy(plan);
+		//cudaFree(data);
 	}
 
 	void initPopulationCUDA()
@@ -161,11 +172,14 @@ public:
 		cudaDeviceSynchronize();
 
 		//Run initialise population kernel//
-		CUDA_Kernels::initPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, deviceRandomStatesBuffer_, *deviceRoationIndex_);
+		CUDA_Kernels::initPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, deviceRandomStatesBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
+
+		float* tempBuffer = new float[population.populationLength * population.numDimensions * 2];
+		cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
 	}
 
-	void initRandomStateCL()
+	void initRandomStateCUDA()
 	{
 		//Initialize random numbers in CPU buffer//
 		unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
@@ -194,7 +208,119 @@ public:
 		//Calculate and load fft data for target audio//
 		targetAudioLength = aTargetAudioLength;
 		objective.calculateFFT(aTargetAudio, targetFFT_);
-		cudaMemcpy(devicetargetFFT, targetFFT_, objective.fftHalfSize * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(deviceTargetFFTBuffer_, targetFFT_, objective.fftHalfSize * sizeof(float), cudaMemcpyHostToDevice);
+	}
+
+
+	void executeGeneration()
+	{
+		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
+
+		CUDA_Kernels::recombinePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, rotationIndex_);
+		//cudaDeviceSynchronize();
+		
+		auto end = std::chrono::steady_clock::now();
+		auto diff = end - start;
+		kernelExecuteTime_[recombinePopulation] += diff;
+
+		//float* tempBuffer = new float[population.populationLength * population.numDimensions * 2];
+		//cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
+
+		//printBest();
+
+		start = std::chrono::steady_clock::now();
+
+		CUDA_Kernels::mutatePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, deviceRandomStatesBuffer_, rotationIndex_);
+		cudaDeviceSynchronize();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[mutatePopulation] += diff;
+
+		//cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
+
+		//printBest();
+
+		start = std::chrono::steady_clock::now();
+
+		CUDA_Kernels::synthesisePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, deviceGeneratedAudioBuffer_, deviceParamMinBuffer_, deviceParamMaxBuffer_, rotationIndex_);
+		cudaDeviceSynchronize();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[synthesisePopulation] += diff;
+
+		//float* tempAudioBuffer = new float[population.populationLength * objective.audioLength];
+		//cudaMemcpy(tempAudioBuffer, deviceGeneratedAudioBuffer_, population.populationLength * objective.audioLength * sizeof(float), cudaMemcpyDeviceToHost);
+
+		//printBest();
+
+		start = std::chrono::steady_clock::now();
+
+		CUDA_Kernels::applyWindowPopulationExecute(globalWorkspace_, localWorkspace_, deviceGeneratedAudioBuffer_);
+		cudaDeviceSynchronize();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[applyWindowPopulation] += diff;
+
+		//cudaMemcpy(tempAudioBuffer, deviceGeneratedAudioBuffer_, population.populationLength * objective.audioLength * sizeof(float), cudaMemcpyDeviceToHost);
+
+		start = std::chrono::steady_clock::now();
+
+		//CudaFFT//
+		executeCudaFFT();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[cudaFFT] += diff;
+
+		//float* tempFFTBuffer = new float[population.populationLength * objective.fftOutSize];
+		//cudaMemcpy(tempFFTBuffer, deviceGeneratedFFTBuffer_, population.populationLength * objective.fftOutSize * sizeof(float), cudaMemcpyDeviceToHost);
+
+		start = std::chrono::steady_clock::now();
+
+		//@ToDo - Make sure updated targetFFT and generatedFFT.
+		CUDA_Kernels::fitnessPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationFitnessBuffer_, deviceGeneratedFFTBuffer_, deviceTargetFFTBuffer_, rotationIndex_);
+		cudaDeviceSynchronize();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[fitnessPopulation] += diff;
+
+		start = std::chrono::steady_clock::now();
+
+		//float* tempFitnessBuffer = new float[population.populationLength * 2];
+		//cudaMemcpy(tempFitnessBuffer, devicePopulationFitnessBuffer_, population.populationLength * sizeof(float) * 2, cudaMemcpyDeviceToHost);
+
+		CUDA_Kernels::sortPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, rotationIndex_);
+		cudaDeviceSynchronize();
+
+		end = std::chrono::steady_clock::now();
+		diff = end - start;
+		kernelExecuteTime_[sortPopulation] += diff;
+
+		//printBest();
+
+		//@ToDo - Really need to run a kernel for this? Just rotatethe index host side!
+		//CUDA_Kernels::rotatePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, rotationIndex_);
+		rotationIndex_ = (rotationIndex_ == 0 ? 1 : 0);
+
+		//delete tempBuffer;
+		//delete tempAudioBuffer;
+	}
+	void executeAllGenerations()
+	{
+		for (uint32_t i = 0; i != numGenerations; ++i)
+		{
+			executeGeneration();
+		}
+		for (uint32_t i = 0; i != numKernels_; ++i)
+		{
+			std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
+			//executeTime = executeTime / numGenerations;
+			std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
+		}
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
 	{
@@ -202,11 +328,13 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
-		for (int i = 0; i < numChunks_; i++)
+		initRandomStateCUDA();
+		for (int i = 0; i < numChunks_-1; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
-			//initKernelArgumentsCL();
+			
+			
 			initPopulationCUDA();
 
 			//Execute number of ES generations on chunk//
@@ -215,6 +343,31 @@ public:
 			printf("Audio chunk %d evaluated:\n", i);
 			printBest();
 		}
+	}
+
+	//@ToDo - When using rotation index, need check this actually prints latest best//
+	void printBest()
+	{
+		uint32_t tempSize = 4 * sizeof(float);
+		float* tempData = new float[4];
+		float* tempFitness = new float[2];
+		cudaMemcpy(tempData, devicePopulationValueBuffer_, population.numDimensions * sizeof(float), cudaMemcpyDeviceToHost);
+		cudaMemcpy(tempFitness, devicePopulationFitnessBuffer_, 2*sizeof(float), cudaMemcpyDeviceToHost);
+		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\nFitness=%f\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3], tempFitness[0]);
+
+
+		delete(tempData);
+	}
+
+	void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
+	{
+		cudaMemcpy(aInputPopulationValueData, devicePopulationValueBuffer_, aPopulationValueSize, cudaMemcpyDeviceToHost);
+		cudaMemcpy(aInputPopulationStepData, devicePopulationStepBuffer_, aPopulationStepSize, cudaMemcpyDeviceToHost);
+		cudaMemcpy(aInputPopulationFitnessData, devicePopulationFitnessBuffer_, aPopulationFitnessSize, cudaMemcpyDeviceToHost);
+	}
+	void readSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
+	{
+		cudaMemcpy(aOutputAudioBuffer, deviceGeneratedAudioBuffer_, aOutputAudioSize, cudaMemcpyDeviceToHost);
 	}
 };
 

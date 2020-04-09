@@ -459,9 +459,12 @@ __kernel void applyWindowPopulation(__global float* audio_waves)
     float mu = ( FFT_ONE_OVER_SIZE - 1) * 2.0f * M_PI;
     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
     {
-        float fft_window_sample = (1.0 - cos((float)(index % AUDIO_WAVE_FORM_SIZE) * mu));
-        audio_waves[index] = fft_window_sample * audio_waves[index];
-        index += POPULATION_COUNT;
+		float fft_window_sample = 1.0 - cos(i  * mu);
+        audio_waves[index*AUDIO_WAVE_FORM_SIZE+i] = fft_window_sample * audio_waves[index*AUDIO_WAVE_FORM_SIZE+i];
+		
+        //float fft_window_sample = (1.0 - cos((float)(index % AUDIO_WAVE_FORM_SIZE) * mu));
+        //audio_waves[index] = fft_window_sample * audio_waves[index];
+        //index += POPULATION_COUNT;
     }
 }
 

@@ -1127,11 +1127,16 @@ public:
 		//VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], storageBuffersMemory_[outputAudioBuffer], populationAudioDate);
 		//copyBuffer(storageBuffers_[outputAudioBuffer], stagingBufferDst, storageBufferSizes_[outputAudioBuffer]);
 		//VKHelper::readBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], stagingBufferMemoryDst, populationAudioDate);
+		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 		readLocalBuffer(storageBuffers_[outputAudioBuffer], storageBufferSizes_[outputAudioBuffer], populationAudioDate);
 		
+
 		calculateAudioFFT();	//@ToDo - Work out how to calculate FFT for GPU acceptable format.
 
 		writeLocalBuffer(storageBuffers_[inputFFTDataBuffer], storageBufferSizes_[inputFFTDataBuffer], populationFFTData);
+		auto end = std::chrono::steady_clock::now();
+		auto diff = end - start;
+		shaderExecuteTime_[5] += diff.count() / (float)1e6;
 		//VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[outputAudioBuffer], stagingBufferMemorySrc, populationAudioDate);
 		//copyBuffer(stagingBufferSrc, storageBuffers_[outputAudioBuffer], storageBufferSizes_[outputAudioBuffer]);
 		//VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
@@ -1155,32 +1160,32 @@ public:
 
 			uint64_t timestamp[2];
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			uint64_t diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[0] += diff / (float)1e6;
 			//printf("Timestamp information [%d]: %f\n", 0, diff / (float)1e6);
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[1] += diff / (float)1e6;
 			//printf("Timestamp information [%d]: %f\n", 1, diff / (float)1e6);
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[2] += diff / (float)1e6;
 			//printf("Timestamp information [%d]: %f\n", 2, diff / (float)1e6);
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[3] += diff / (float)1e6;
 			//printf("Timestamp information [%d]: %f\n", 3, diff / (float)1e6);
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[4] += diff / (float)1e6;
 			//printf("Timestamp information [%d]: %f\n", 4, diff / (float)1e6);
@@ -1190,27 +1195,30 @@ public:
 			//diff = timestamp[1] - timestamp[0];
 			//shaderExecuteTime_[5] += diff / (float)1e6;
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[6] += diff / (float)1e6;
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[7] += diff / (float)1e6;
 
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[8] += diff / (float)1e6;
 		}
 
+		float totalKernelRunTime = 0.0;
 		for (uint32_t i = 0; i != numPipelines_; ++i)
 		{
 			//executeTime = executeTime / numGenerations;
-			std::cout << "Time to complete kernel " << i << ": " << shaderExecuteTime_[i] << "\n";
+			std::cout << "Time to complete kernel " << i << ": " << shaderExecuteTime_[i] << "ms\n";
+			totalKernelRunTime += shaderExecuteTime_[i];
 		}
+		std::cout << "Time to complete all kernels for this run: " << totalKernelRunTime << "ms\n";
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
 	{

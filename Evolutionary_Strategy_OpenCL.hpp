@@ -141,7 +141,7 @@ public:
 		initBuffersCL();
 		initKernelsCL(kernelSourcePath_);
 		initKernelArgumentsCL();
-		initRandomStateCL();
+		//initRandomStateCL();
 	}
 	void initMemory()
 	{
@@ -217,26 +217,6 @@ public:
 			}
 			std::cout << std::endl;
 		}
-
-
-		//Discover platforms//
-		//std::vector <cl::Platform> platforms;
-		//cl::Platform::get(&platforms);
-		//
-		////Create contex properties for first platform//
-		//cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platforms[aPlatform])(), 0 };	//Need to specify platform 3 for dedicated graphics - Harri Laptop.
-		//
-		////Create context context using platform for GPU device//
-		//if (deviceType_ == DeviceType::INTEGRATED)
-		//	context_ = cl::Context(CL_DEVICE_TYPE_CPU, contextProperties);
-		//if(deviceType_ == DeviceType::DISCRETE)
-		//	context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
-		//else
-		//	context_ = cl::Context(CL_DEVICE_TYPE_ALL, contextProperties);
-		//
-		////Get device list from context//
-		//std::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
-		//device_ = devices[aDevice];
 	}
 	void initKernelsCL(std::string aPath)
 	{
@@ -491,7 +471,7 @@ public:
 	void executeGeneration()
 	{
 		//Iterate and execute through kernels//
-		for (auto iter = kernels_.begin() + recombinePopulation; iter != kernels_.end(); ++iter)
+		for (auto iter = kernels_.begin()+1; iter != kernels_.end(); ++iter)
 		{
 			uint32_t idx = std::distance(kernels_.begin(), iter);
 			if (idx == openCLFFT)
@@ -530,6 +510,15 @@ public:
 				//clFinish(commandQueue_());
 				//commandQueue_.flush();
 
+				//float* tempBufferCL = new float[population.populationLength * objective.audioLength];
+				//commandQueue_.enqueueReadBuffer(storageBuffers_[outputAudioBuffer], CL_TRUE, 0, population.populationLength * objective.audioLength * sizeof(float), tempBufferCL);
+				//
+				//float* tempFFTBufferCL = new float[population.populationLength * objective.fftOutSize];
+				//commandQueue_.enqueueReadBuffer(storageBuffers_[inputFFTDataBuffer], CL_TRUE, 0, population.populationLength * objective.fftOutSize * sizeof(float), tempFFTBufferCL);
+				//
+				//float* tempFitnessBufferCL = new float[population.populationLength * 2];
+				//commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationFitnessBuffer], CL_TRUE, 0, population.populationLength * sizeof(float) * 2, tempFitnessBufferCL);
+
 				auto end = std::chrono::steady_clock::now();
 				auto diff = end - start;
 				kernelExecuteTime_[idx] += diff;
@@ -547,7 +536,7 @@ public:
 		{
 			std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
 			//executeTime = executeTime / numGenerations;
-			std::cout << "Time to complete kernel " << i << ": " << executeTime.count() << "\n";
+			std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
 		}
 	}
 	void executeOpenCLFFT()
@@ -556,6 +545,9 @@ public:
 		errorStatus_ = clfftEnqueueTransform(planHandle, CLFFT_FORWARD, 1, &commandQueue_(), 0, NULL, NULL, &storageBuffers_[outputAudioBuffer](), &storageBuffers_[inputFFTDataBuffer](), NULL);
 		commandQueue_.finish();
 		//commandQueue_.flush();
+
+		float* tempBufferCL = new float[population.populationLength * objective.fftOutSize];
+		commandQueue_.enqueueReadBuffer(storageBuffers_[inputFFTDataBuffer], CL_TRUE, 0, population.populationLength * objective.fftOutSize * sizeof(float), tempBufferCL);
 	}
 
 	void setTargetAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -573,11 +565,13 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		initRandomStateCL();
 		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
 			//initKernelArgumentsCL();
+			
 			initPopulationCL();
 
 			//Execute number of ES generations on chunk//

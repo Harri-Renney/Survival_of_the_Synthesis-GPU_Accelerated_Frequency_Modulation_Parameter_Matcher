@@ -73,7 +73,7 @@ layout(constant_id = 9) const uint AUDIO_WAVE_FORM_SIZE = 1024;
 
 layout(constant_id = 10) const uint FFT_OUT_SIZE = 1023;
 layout(constant_id = 11) const uint FFT_HALF_SIZE = 512;
-layout(constant_id = 12) const float FFT_ONE_OVER_SIZE = 1 / 1023;
+layout(constant_id = 12) const float FFT_ONE_OVER_SIZE = 1 / 1023.0;
 layout(constant_id = 13) const float FFT_ONE_OVER_WINDOW_FACTOR = 1.0;
 
 layout(constant_id = 14) const float M_PI = 3.14159265358979323846;
@@ -99,6 +99,7 @@ layout (local_size_x_id = 1, local_size_y_id = 2) in;
 /*------------------------------------------------------------------------------
    Apply Window
 ------------------------------------------------------------------------------*/
+//layout(constant_id = 24) const float mu = ( (1 / 1023.0) - 1) * 2.0f * 3.14159265358979323846;
 void main()
 {
     //Set all work item IDs//
@@ -111,8 +112,11 @@ void main()
 	const float mu = ( FFT_ONE_OVER_SIZE - 1) * 2.0f * M_PI;
     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
     {
-        float fft_window_sample = (1.0 - cos(float((gid % AUDIO_WAVE_FORM_SIZE)) * mu));
-        outputAudioPayload[gid] = fft_window_sample * outputAudioPayload[gid];
-        gid += POPULATION_COUNT;
+		float fft_window_sample = 1.0 - cos(float(i  * mu));
+        outputAudioPayload[gid*AUDIO_WAVE_FORM_SIZE+i] = fft_window_sample * outputAudioPayload[gid*AUDIO_WAVE_FORM_SIZE+i];
+		
+        //float fft_window_sample = (1.0 - cos(float((gid % AUDIO_WAVE_FORM_SIZE)) * mu));
+        //outputAudioPayload[gid] = fft_window_sample * outputAudioPayload[gid];
+        //gid += POPULATION_COUNT;
     }
 }

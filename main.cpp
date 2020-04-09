@@ -245,9 +245,9 @@ int main(int argc, char* argv[])
 		//esOpenCL.executeFitness();
 		//esOpenCL.executeSynthesise();
 
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
+		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		//es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
 		{
