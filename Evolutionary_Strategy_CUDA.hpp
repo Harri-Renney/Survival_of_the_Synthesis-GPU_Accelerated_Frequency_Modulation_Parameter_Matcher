@@ -217,7 +217,7 @@ public:
 		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
 		CUDA_Kernels::recombinePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, rotationIndex_);
-		//cudaDeviceSynchronize();
+		cudaDeviceSynchronize();
 		
 		auto end = std::chrono::steady_clock::now();
 		auto diff = end - start;
