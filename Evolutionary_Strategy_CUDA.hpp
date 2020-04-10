@@ -29,13 +29,39 @@ struct Evolutionary_Strategy_CUDA_Arguments
 
 namespace CUDA_Kernels
 {
+	__constant__ int POPULATION_COUNT = 1536;
+	__constant__ int POPULATION_SIZE = 1536 * (4);
+	__constant__ const int NUM_DIMENSIONS = 4;
+	__constant__ const int WRKGRPSIZE = 32;
+	__constant__ const int NUM_WGS_FOR_PARENTS = 6;
+
+	__constant__ const int CHUNK_SIZE_FITNESS = (32 / 2);
+	__constant__ const int AUDIO_WAVE_FORM_SIZE = 1024;
+	__constant__ const int CHUNKS_PER_WG_SYNTH = 1;
+	__constant__ const int CHUNK_SIZE_SYNTH = 32 / 1;
+	__constant__ const float ONE_OVER_SAMPLE_RATE_TIMES_2_PI = 0.00014247573;
+
+	__constant__ const int FFT_OUT_SIZE = 1026;
+	__constant__ const int FFT_HALF_SIZE = 512;
+	__constant__ const float FFT_ONE_OVER_SIZE = 1 / 1026.0;
+	__constant__ const float FFT_ONE_OVER_WINDOW_FACTOR = 1.0;
+
+	__constant__ const float ALPHA = 1.4;
+	__constant__ const float ONE_OVER_ALPHA = 1 / 1.4;
+	__constant__ const float ROOT_TWO_OVER_PI = 0.797884524;
+	__constant__ const float BETA_SCALE = 0.25;
+	__constant__ const float BETA = 0.5;
+	__constant__ const int WAVETABLE_SIZE = 32768;
+
+	void setConstants(uint32_t& aPopulationCount);
+
 	void initPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, float* aPopulationFitness, uint2* const aRandState, uint32_t aRotationIndex);
 
 	void recombinePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, uint32_t aRotationIndex);
 
 	void mutatePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, uint2* rand_state, uint32_t aRotationIndex);
 
-	void synthesisePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aOutputAudioWaves, const float* aParamMins, const float* aParamMaxs, uint32_t aRotationIndex);
+	void synthesisePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aOutputAudioWaves, const float* aParamMins, const float* aParamMaxs, const float* aWavetable, uint32_t aRotationIndex);
 
 	void applyWindowPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aAudioWaves);
 
@@ -107,6 +133,20 @@ public:
 		init();
 	}
 
+	~Evolutionary_Strategy_CUDA()
+	{
+		cufftDestroy(fftplan_);
+		cudaFree(devicePopulationValueBuffer_);
+		cudaFree(devicePopulationStepBuffer_);
+		cudaFree(devicePopulationFitnessBuffer_);
+		cudaFree(deviceRandomStatesBuffer_);
+		cudaFree(deviceParamMinBuffer_);
+		cudaFree(deviceParamMaxBuffer_);
+		cudaFree(deviceGeneratedAudioBuffer_);
+		cudaFree(deviceRoationIndex_);
+		cudaFree(deviceWavetableBuffer_);
+	}
+
 	void init()
 	{	
 		//@ToDo - Allocate the correct kind of memory for device//
@@ -125,6 +165,9 @@ public:
 		//Load parameter min & max//
 		cudaMemcpy(deviceParamMinBuffer_, &objective.paramMins.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(deviceParamMaxBuffer_, &objective.paramMaxs.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
+
+		//Load generated wavetable to GPU//
+		cudaMemcpy(deviceWavetableBuffer_, objective.wavetable, objective.wavetableSize * sizeof(float), cudaMemcpyHostToDevice);
 
 		initDeviceMemory();
 	}
@@ -161,8 +204,6 @@ public:
 	{
 		cufftExecR2C(fftplan_, deviceGeneratedAudioBuffer_, reinterpret_cast<cufftComplex *>(deviceGeneratedFFTBuffer_));
 		cudaDeviceSynchronize();
-		//cufftDestroy(plan);
-		//cudaFree(data);
 	}
 
 	void initPopulationCUDA()
@@ -243,7 +284,7 @@ public:
 
 		start = std::chrono::steady_clock::now();
 
-		CUDA_Kernels::synthesisePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, deviceGeneratedAudioBuffer_, deviceParamMinBuffer_, deviceParamMaxBuffer_, rotationIndex_);
+		CUDA_Kernels::synthesisePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, deviceGeneratedAudioBuffer_, deviceParamMinBuffer_, deviceParamMaxBuffer_, deviceWavetableBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
 
 		end = std::chrono::steady_clock::now();
@@ -328,12 +369,13 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		CUDA_Kernels::setConstants(population.populationLength);
+
 		initRandomStateCUDA();
-		for (int i = 0; i < numChunks_-1; i++)
+		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
-			
 			
 			initPopulationCUDA();
 

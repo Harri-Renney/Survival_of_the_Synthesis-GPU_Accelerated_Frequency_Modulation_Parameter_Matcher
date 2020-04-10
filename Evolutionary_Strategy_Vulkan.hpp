@@ -49,13 +49,13 @@ struct Specialization_Constants
 	uint32_t workgroupY = 1;
 	uint32_t workgroupZ = 1;
 	uint32_t workgroupSize = 32;
-	uint32_t numDimensions = 1024;
+	uint32_t numDimensions = 4;
 
 	uint32_t populationCount = 1536;
 	uint32_t numWorkgroupsPerParent = 1;	//population->num_parents / cl->work_group_size
 	uint32_t chunkSizeFitness = 1;
 
-	uint32_t audioWaveFormSize = 1;
+	uint32_t audioWaveFormSize = 1024;
 
 	uint32_t fftOutSize = 1;
 	uint32_t fftHalfSize = 1;
