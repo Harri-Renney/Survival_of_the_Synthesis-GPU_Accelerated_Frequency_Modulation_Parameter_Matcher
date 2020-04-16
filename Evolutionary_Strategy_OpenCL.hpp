@@ -17,6 +17,7 @@
 #include <clFFT.h>
 
 #include "Evolutionary_Strategy.hpp"
+#include "Benchmarker.hpp"
 
 
 enum DeviceType { INTEGRATED = 32902, DISCRETE = 4098, NVIDIA = 4318};
@@ -83,6 +84,8 @@ private:
 
 	DeviceType deviceType_;
 
+	Benchmarker clBenchmarker_;
+
 	const std::string compilerArguments_ =
 		"-cl-fast-relaxed-math "
 		"-D WRKGRPSIZE=%d "
@@ -104,6 +107,7 @@ private:
 public:
 	Evolutionary_Strategy_OpenCL(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, std::string aKernelSourcePath, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
+		clBenchmarker_("openclog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		kernelSourcePath_(aKernelSourcePath),
 		workgroupX(32),
 		workgroupY(1),
@@ -117,6 +121,7 @@ public:
 	}
 	Evolutionary_Strategy_OpenCL(Evolutionary_Strategy_OpenCL_Arguments args) :
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
+		clBenchmarker_("openclog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		kernelSourcePath_(args.kernelSourcePath),
 		workgroupX(args.workgroupX),
 		workgroupY(args.workgroupY),
@@ -505,8 +510,10 @@ public:
 				cl::Kernel currentKernel = *iter;
 				std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
+				clBenchmarker_.startTimer(kernelNames_[idx]);
 				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, globalSize_, workgroupSize, NULL);
 				commandQueue_.finish();
+				clBenchmarker_.pauseTimer(kernelNames_[idx]);
 				//clFinish(commandQueue_());
 				//commandQueue_.flush();
 
@@ -580,6 +587,7 @@ public:
 			printf("Audio chunk %d evaluated:\n", i);
 			printBest();
 		}
+		clBenchmarker_.elapsedTimer(kernelNames_[1]);
 	}
 
 	//@ToDo - When using rotation index, need check this actually prints latest best//

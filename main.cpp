@@ -224,8 +224,7 @@ int main(int argc, char* argv[])
 
 		//Start total compute time//
 		std::chrono::time_point<std::chrono::steady_clock> start;
-		//if (isBenchmarking)
-			start = std::chrono::steady_clock::now();
+		start = std::chrono::steady_clock::now();
 
 		es->parameterMatchAudio(targetAudio, targetAudioLength);
 
@@ -245,8 +244,8 @@ int main(int argc, char* argv[])
 		//esOpenCL.executeFitness();
 		//esOpenCL.executeSynthesise();
 
-		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		//es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
@@ -254,7 +253,7 @@ int main(int argc, char* argv[])
 			//std::cout << i << ": " << (testingValues)[i] << std::endl;
 			//std::cout << i << ": " << (fftAudioData)[i] << std::endl;
 			//std::cout << i << ": " << (fftTargetData)[i] << std::endl;
-			printf("%d: %f\n", i, (inputPopulationFitness)[i]);
+			//printf("%d: %f\n", i, (inputPopulationFitness)[i]);
 			//printf("%d: %f\n", i, (inputPopulationValues)[i]);
 			//printf("%d: %f\n", i, (outputAudioData)[i]);
 			//std::cout << i << ": " << inputPopulationValues[i + es->population.populationSize * *((Evolutionary_Strategy_Vulkan*)(es))->rotationIndex_] << std::endl;

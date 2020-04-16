@@ -270,7 +270,7 @@ __kernel void mutatePopulation(__global float* in_population_values,
      /* Scale the synthesis parameters */
      for(int i = 0; i < NUM_DIMENSIONS; i++)
      {
-         params_scaled[i] = param_mins[i] + group_population_values[pop_index + i] *
+         params_scaled[i] = param_mins[i] + in_population_values[populationStartIndex + index * NUM_DIMENSIONS + i] *
                             (param_maxs[i] - param_mins[i]);
      }
 
@@ -299,27 +299,14 @@ __kernel void mutatePopulation(__global float* in_population_values,
      /* Perform synthesis in chunks as a single waveform output can be very long.
       * In each iteration of this outer loop, each work item synthesises a chunk of the wave then the work group
       * writes back to global memory */
-     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE / CHUNK_SIZE_SYNTH; i++)
+     for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
      {
-         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-         {
              cur_sample = sin(wave_table_pos_1 * ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * modIdxMulModFreq +
                           carrierFreq;
-             audio_chunks[local_index * CHUNK_SIZE_SYNTH + j] = sin(wave_table_pos_2 *
+             out_audio_waves[index * AUDIO_WAVE_FORM_SIZE + i] = sin(wave_table_pos_2 *
                      ONE_OVER_SAMPLE_RATE_TIMES_2_PI) * carrierAmp;
              wave_table_pos_1 += params_scaled[0];
              wave_table_pos_2 += cur_sample;
-
-
-         }
-         int out_index_local = local_chunk_index * CHUNK_SIZE_SYNTH + local_id_mod_chunk;
-         for(int j = 0; j < CHUNK_SIZE_SYNTH; j++)
-         {
-             out_audio_waves[out_index] = audio_chunks[out_index_local];
-             out_index += CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE;
-             out_index_local += CHUNKS_PER_WG_SYNTH * CHUNK_SIZE_SYNTH;
-         }
-         out_index -= (CHUNKS_PER_WG_SYNTH * AUDIO_WAVE_FORM_SIZE - 1) *  CHUNK_SIZE_SYNTH;
      }
      //out_audio_waves[0] = 1.0;
  }

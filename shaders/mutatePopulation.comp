@@ -90,6 +90,10 @@ layout(binding = 12) buffer rotationIndexBuffer
 {
    uint rotationIndexPayload;
 };
+layout(binding = 13) buffer wavetableBuffer
+{
+   float wavetablePayload[];
+};
 layout( push_constant ) uniform index{int rotationIndex;} RotationIndex;
 
 layout (constant_id = 1) const uint WORKGROUP_X = 32;
