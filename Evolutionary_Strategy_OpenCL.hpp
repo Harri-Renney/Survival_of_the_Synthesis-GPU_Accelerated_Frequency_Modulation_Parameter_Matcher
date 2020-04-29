@@ -20,7 +20,7 @@
 #include "Benchmarker.hpp"
 
 
-enum DeviceType { INTEGRATED = 32902, DISCRETE = 4098, NVIDIA = 4318};
+enum DeviceType { CPU = 32902, INTEGRATED = 32902, DISCRETE = 4098, NVIDIA = 4318};
 
 struct Evolutionary_Strategy_OpenCL_Arguments
 {
@@ -51,7 +51,7 @@ private:
 
 	//Kernels//
 	static const uint8_t numKernels_ = 9;
-	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, openCLFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, openCLFFT, fitnessPopulation, sortPopulation, rotatePopulation };
 	std::array<std::string, numKernels_> kernelNames_;
 	std::array<cl::Kernel, numKernels_> kernels_;
 	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
@@ -107,28 +107,28 @@ private:
 public:
 	Evolutionary_Strategy_OpenCL(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, std::string aKernelSourcePath, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
-		clBenchmarker_("openclog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
+		clBenchmarker_(std::string("openclog(pop=" + std::to_string(aNumParents+aNumOffspring) + "gens=" + std::to_string(aNumGenerations) + "audioBlockSize=" + std::to_string(1 << aAudioLengthLog2) + ").csv"), { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		kernelSourcePath_(aKernelSourcePath),
 		workgroupX(32),
 		workgroupY(1),
 		workgroupZ(1),
 		workgroupSize(workgroupX*workgroupY*workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
-		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" }),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
 		globalSize_(population.populationLength)
 	{
 		init();
 	}
 	Evolutionary_Strategy_OpenCL(Evolutionary_Strategy_OpenCL_Arguments args) :
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
-		clBenchmarker_("openclog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
+		clBenchmarker_(std::string("openclog(pop=" + std::to_string(args.es_args.pop.populationLength) + "gens=" + std::to_string(args.es_args.numGenerations) + "audioBlockSize=" + std::to_string(1 << args.es_args.audioLengthLog2) + ").csv"), { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		kernelSourcePath_(args.kernelSourcePath),
 		workgroupX(args.workgroupX),
 		workgroupY(args.workgroupY),
 		workgroupZ(args.workgroupZ),
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
-		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" }),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
 		globalSize_(population.populationLength),
 		deviceType_(args.deviceType)
 	{
@@ -140,7 +140,7 @@ public:
 		initMemory();
 
 		//Initialise OpenCL context//
-		initContextCL(1, 0);
+		initContextCL();
 
 		initCLFFT();
 		initBuffersCL();
@@ -190,7 +190,7 @@ public:
 			std::cout << "ERROR creating clFFT plan. Status code: " << errorStatus_ << std::endl;
 	}
 	//@ToDo - Right now pick platform. Can extend to pick best available.
-	void initContextCL(uint8_t aPlatform, uint8_t aDevice)
+	void initContextCL()
 	{
 		std::vector <cl::Platform> platforms;
 		cl::Platform::get(&platforms);
@@ -199,7 +199,7 @@ public:
 			cl::Platform platform(*it);
 
 			cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platform)(), 0 };
-			context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
+			context_ = cl::Context(CL_DEVICE_AVAILABLE, contextProperties);
 		
 			cl::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
 		
@@ -299,9 +299,9 @@ public:
 			cl::Buffer& currentBuffer = *iter;
 
 			//Set access flag appropriatly for each buffer//
-			//if (idx == paramMinBuffer || idx == paramMaxBuffer || idx == inputFFTTargetBuffer)
-			//	memoryFlags = CL_MEM_READ_ONLY;
-			//else
+			if (idx == paramMinBuffer || idx == paramMaxBuffer || idx == inputFFTTargetBuffer)
+				memoryFlags = CL_MEM_READ_ONLY;
+			else
 				memoryFlags = CL_MEM_READ_WRITE;
 
 			currentBuffer = cl::Buffer(context_, memoryFlags, storageBufferSizes_[idx]);
@@ -356,19 +356,13 @@ public:
 		kernels_[sortPopulation].setArg(0, sizeof(cl_mem), &(storageBuffers_[inputPopulationValueBuffer]));
 		kernels_[sortPopulation].setArg(1, sizeof(cl_mem), &(storageBuffers_[inputPopulationStepBuffer]));
 		kernels_[sortPopulation].setArg(2, sizeof(cl_mem), &(storageBuffers_[inputPopulationFitnessBuffer]));
-		kernels_[sortPopulation].setArg(3, sizeof(cl_mem), &(storageBuffers_[outputPopulationValueBuffer]));
-		kernels_[sortPopulation].setArg(4, sizeof(cl_mem), &(storageBuffers_[outputPopulationStepBuffer]));
-		kernels_[sortPopulation].setArg(5, sizeof(cl_mem), &(storageBuffers_[outputPopulationFitnessBuffer]));
-		kernels_[sortPopulation].setArg(6, sizeof(cl_mem), &(storageBuffers_[rotationIndexBuffer]));
+		kernels_[sortPopulation].setArg(3, sizeof(cl_mem), &(storageBuffers_[rotationIndexBuffer]));
 
-		//Set copyPopulation kernel arguments//
-		kernels_[copyPopulation].setArg(0, sizeof(cl_mem), &(storageBuffers_[outputPopulationValueBuffer]));
-		kernels_[copyPopulation].setArg(1, sizeof(cl_mem), &(storageBuffers_[outputPopulationStepBuffer]));
-		kernels_[copyPopulation].setArg(2, sizeof(cl_mem), &(storageBuffers_[outputPopulationFitnessBuffer]));
-		kernels_[copyPopulation].setArg(3, sizeof(cl_mem), &(storageBuffers_[inputPopulationValueBuffer]));
-		kernels_[copyPopulation].setArg(4, sizeof(cl_mem), &(storageBuffers_[inputPopulationStepBuffer]));
-		kernels_[copyPopulation].setArg(5, sizeof(cl_mem), &(storageBuffers_[inputPopulationFitnessBuffer]));
-		kernels_[copyPopulation].setArg(6, sizeof(cl_mem), &(storageBuffers_[rotationIndexBuffer]));
+		//Set rotatePopulation kernel arguments//
+		kernels_[rotatePopulation].setArg(0, sizeof(cl_mem), &(storageBuffers_[inputPopulationValueBuffer]));
+		kernels_[rotatePopulation].setArg(1, sizeof(cl_mem), &(storageBuffers_[inputPopulationStepBuffer]));
+		kernels_[rotatePopulation].setArg(2, sizeof(cl_mem), &(storageBuffers_[inputPopulationFitnessBuffer]));
+		kernels_[rotatePopulation].setArg(3, sizeof(cl_mem), &(storageBuffers_[rotationIndexBuffer]));
 	}
 
 	void initPopulationCL()
@@ -481,19 +475,25 @@ public:
 			uint32_t idx = std::distance(kernels_.begin(), iter);
 			if (idx == openCLFFT)
 			{
-				std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
+				clBenchmarker_.startTimer(kernelNames_[idx]);
 				executeOpenCLFFT();
-				auto end = std::chrono::steady_clock::now();
-				auto diff = end - start;
-				kernelExecuteTime_[idx] += diff;
+				clBenchmarker_.pauseTimer(kernelNames_[idx]);
+			}
+			else if (idx == rotatePopulation)
+			{
+				clBenchmarker_.startTimer(kernelNames_[idx]);
+				rotationIndex_ = (rotationIndex_ == 0 ? 1 : 0);
+				commandQueue_.enqueueWriteBuffer(storageBuffers_[rotationIndexBuffer], CL_TRUE, 0, sizeof(uint32_t), &rotationIndex_);
+				commandQueue_.finish();
+				clBenchmarker_.pauseTimer(kernelNames_[idx]);
 			}
 			//else if (idx == sortPopulation)
 			//{
 			//
 			//}
-			//else if (idx == copyPopulation)
+			//else if (idx == rotatePopulation)
 			//{ }
-			//else if (idx == copyPopulation)
+			//else if (idx == rotatePopulation)
 			//{
 			//	std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 			//
@@ -505,30 +505,35 @@ public:
 			//	auto diff = end - start;
 			//	kernelExecuteTime_[idx] += diff;
 			//}
+			//else if (idx == applyWindowPopulation)
+			//{
+			//	cl::Kernel currentKernel = *iter;
+			//	clBenchmarker_.startTimer(kernelNames_[idx]);
+			//	commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, 1024, workgroupSize, NULL);
+			//	commandQueue_.finish();
+			//	clBenchmarker_.pauseTimer(kernelNames_[idx]);
+			//}
+			//else if (idx == mutatePopulation)
+			//{
+			//	cl::Kernel currentKernel = *iter;
+			//	clBenchmarker_.startTimer(kernelNames_[idx]);
+			//	commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, globalSize_*4, workgroupSize, NULL);
+			//	commandQueue_.finish();
+			//	clBenchmarker_.pauseTimer(kernelNames_[idx]);
+			//}
 			else
 			{
 				cl::Kernel currentKernel = *iter;
-				std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
+				//std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
 				clBenchmarker_.startTimer(kernelNames_[idx]);
 				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, globalSize_, workgroupSize, NULL);
 				commandQueue_.finish();
 				clBenchmarker_.pauseTimer(kernelNames_[idx]);
-				//clFinish(commandQueue_());
-				//commandQueue_.flush();
 
-				//float* tempBufferCL = new float[population.populationLength * objective.audioLength];
-				//commandQueue_.enqueueReadBuffer(storageBuffers_[outputAudioBuffer], CL_TRUE, 0, population.populationLength * objective.audioLength * sizeof(float), tempBufferCL);
-				//
-				//float* tempFFTBufferCL = new float[population.populationLength * objective.fftOutSize];
-				//commandQueue_.enqueueReadBuffer(storageBuffers_[inputFFTDataBuffer], CL_TRUE, 0, population.populationLength * objective.fftOutSize * sizeof(float), tempFFTBufferCL);
-				//
-				//float* tempFitnessBufferCL = new float[population.populationLength * 2];
-				//commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationFitnessBuffer], CL_TRUE, 0, population.populationLength * sizeof(float) * 2, tempFitnessBufferCL);
-
-				auto end = std::chrono::steady_clock::now();
-				auto diff = end - start;
-				kernelExecuteTime_[idx] += diff;
+				//auto end = std::chrono::steady_clock::now();
+				//auto diff = end - start;
+				//kernelExecuteTime_[idx] += diff;
 			}
 		}
 		//std::for_each(kernels_.begin(), kernels_.end(), &commandQueue_.enqueueNDRangeKernel);
@@ -539,12 +544,12 @@ public:
 		{
 			executeGeneration();
 		}
-		for (uint32_t i = 0; i != numKernels_; ++i)
-		{
-			std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
-			//executeTime = executeTime / numGenerations;
-			std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
-		}
+		//for (uint32_t i = 0; i != numKernels_; ++i)
+		//{
+		//	std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
+		//	//executeTime = executeTime / numGenerations;
+		//	std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
+		//}
 	}
 	void executeOpenCLFFT()
 	{
@@ -552,9 +557,6 @@ public:
 		errorStatus_ = clfftEnqueueTransform(planHandle, CLFFT_FORWARD, 1, &commandQueue_(), 0, NULL, NULL, &storageBuffers_[outputAudioBuffer](), &storageBuffers_[inputFFTDataBuffer](), NULL);
 		commandQueue_.finish();
 		//commandQueue_.flush();
-
-		float* tempBufferCL = new float[population.populationLength * objective.fftOutSize];
-		commandQueue_.enqueueReadBuffer(storageBuffers_[inputFFTDataBuffer], CL_TRUE, 0, population.populationLength * objective.fftOutSize * sizeof(float), tempBufferCL);
 	}
 
 	void setTargetAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -572,6 +574,10 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		clBenchmarker_.startTimer("Total Audio Analysis Time");
+		clBenchmarker_.pauseTimer("Total Audio Analysis Time");
+		clBenchmarker_.startTimer("Total Audio Analysis Time");
+
 		initRandomStateCL();
 		for (int i = 0; i < numChunks_; i++)
 		{
@@ -587,7 +593,17 @@ public:
 			printf("Audio chunk %d evaluated:\n", i);
 			printBest();
 		}
+		clBenchmarker_.pauseTimer("Total Audio Analysis Time");
+
 		clBenchmarker_.elapsedTimer(kernelNames_[1]);
+		clBenchmarker_.elapsedTimer(kernelNames_[2]);
+		clBenchmarker_.elapsedTimer(kernelNames_[3]);
+		clBenchmarker_.elapsedTimer(kernelNames_[4]);
+		clBenchmarker_.elapsedTimer(kernelNames_[5]);
+		clBenchmarker_.elapsedTimer(kernelNames_[6]);
+		clBenchmarker_.elapsedTimer(kernelNames_[7]);
+		clBenchmarker_.elapsedTimer(kernelNames_[8]);
+		clBenchmarker_.elapsedTimer("Total Audio Analysis Time");
 	}
 
 	//@ToDo - When using rotation index, need check this actually prints latest best//

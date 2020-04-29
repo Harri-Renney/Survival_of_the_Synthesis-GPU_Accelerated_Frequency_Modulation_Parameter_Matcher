@@ -2,6 +2,7 @@
 #define EVOLUTIONARY_STRATEGY_CPU_HPP
 
 #include "Evolutionary_Strategy.hpp"
+#include "Benchmarker.hpp"
 
 #include <vector>
 #include <chrono>
@@ -63,8 +64,11 @@ private:
 	std::vector<float> targetFFT_;
 
 	static const uint8_t numKernels_ = 9;
-	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, CPUFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, CPUFFT, fitnessPopulation, sortPopulation, rotatePopulation };
+	std::array<std::string, numKernels_> kernelNames_;
 	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
+
+	Benchmarker cpuBenchmarker_;
 
 	void initRandomStates()
 	{
@@ -179,19 +183,28 @@ private:
 			objective.synthesiseAudio(currentParams, &audioData_[i * objective.audioLength]);
 		}
 	}
-	void applyWindow()
+	void applyFFTWindow()
 	{
-
+		for (uint32_t i = 0; i != population.populationLength; ++i)
+		{
+			objective.calculateFFTWindow(&audioData_[i * objective.audioLength], &fftAudioData_[i * objective.fftHalfSize]);
+		}
+	}
+	void fft()
+	{
+		for (uint32_t i = 0; i != population.populationLength; ++i)
+		{
+			objective.calculateJustFFT(&audioData_[i * objective.audioLength], &fftAudioData_[i * objective.fftHalfSize]);
+		}
 	}
 	void fitness()
 	{
 		float error = 0.0f;
-		float errorTemp = 0.0;
-		for (uint32_t i = 0; i != population.populationSize; ++i)
+		float errorTemp = 0.0f;
+		for (uint32_t i = 0; i != population.populationLength; ++i)
 		{
 			float fft_magnitude_sum = 0.0;
-			objective.calculateFFT(&audioData_[i * objective.audioLength], &fftAudioData_[i * objective.fftHalfSize]);
-			for (uint32_t j = 0; j != objective.fftHalfSize; j+=1)
+			for (uint32_t j = 0; j < objective.fftHalfSize; j+=2)
 			{
 					//GPU paper//
 					//const float raw_magnitude = hypot(fftAudioData_[(i * objective.fftHalfSize) + (j / 2)],
@@ -201,8 +214,15 @@ private:
 					//	targetFFT_[j/2];
 					//error += errorTemp * errorTemp;
 
-				float temp = fftAudioData_[(i * objective.fftHalfSize) + (j)] - targetFFT_[j];
-				error += temp * temp;
+				const float raw_magnitude = std::hypot(fftAudioData_[i * objective.fftOutSize + j],
+					fftAudioData_[i * objective.fftOutSize + j + 1]);
+				const float magnitude_for_fft_size = raw_magnitude * objective.fftOneOverSize;
+				errorTemp = (magnitude_for_fft_size * objective.fftOneOverWindowFactor) -
+					targetFFT_[j / 2];
+				error += errorTemp * errorTemp;
+
+				//float temp = fftAudioData_[(i * objective.fftHalfSize) + (j)] - targetFFT_[j];
+				//error += temp * temp;
 
 
 					//error += ((fftAudioData_[(i * objective.fftHalfSize) + (j)] * targetFFT_[j])) / objective.fftHalfSize;
@@ -234,19 +254,21 @@ private:
 	{
 		population.quickSortPopulation(0, population.populationSize-1);
 	}
-	void swapPopulations()
+	void rotate()
 	{
-
+		//rotationIndex_ = (rotationIndex_ == 0 ? 1 : 0);
 	}
 
 public:
-	Evolutionary_Strategy_CPU(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
-		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2)
-	{
-
-	}
+	//Evolutionary_Strategy_CPU(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
+	//	Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2)
+	//{
+	//
+	//}
 	Evolutionary_Strategy_CPU(Evolutionary_Strategy_CPU_Arguments args) :
-		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2)
+		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
+		cpuBenchmarker_(std::string("cpulog(pop=" + std::to_string(args.es_args.pop.populationLength) + "gens=" + std::to_string(args.es_args.numGenerations) + "audioBlockSize=" + std::to_string(1 << args.es_args.audioLengthLog2) + ").csv"), { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "FFTW", "fitnessPopulation", "sortPopulation", "rotatePopulation" })
 	{
 		//randomStates_.resize(population.populationSize);
 		//initRandomStates();
@@ -298,41 +320,67 @@ public:
 	{
 		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
+		cpuBenchmarker_.startTimer(kernelNames_[1]);
 		recombine();
+		cpuBenchmarker_.pauseTimer(kernelNames_[1]);
 
-		auto end = std::chrono::steady_clock::now();
-		auto diff = end - start;
-		kernelExecuteTime_[recombinePopulation] += diff;
-		
-		start = std::chrono::steady_clock::now();
+		//auto end = std::chrono::steady_clock::now();
+		//auto diff = end - start;
+		//kernelExecuteTime_[recombinePopulation] += diff;
+		//
+		//start = std::chrono::steady_clock::now();
 
+		cpuBenchmarker_.startTimer(kernelNames_[2]);
 		mutate();
+		cpuBenchmarker_.pauseTimer(kernelNames_[2]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[mutatePopulation] += diff;
-
-		start = std::chrono::steady_clock::now();
+		//end = std::chrono::steady_clock::now();
+		//diff = end - start;
+		//kernelExecuteTime_[mutatePopulation] += diff;
+		//
+		//start = std::chrono::steady_clock::now();
 		
+		cpuBenchmarker_.startTimer(kernelNames_[3]);
 		synthesis();
+		cpuBenchmarker_.pauseTimer(kernelNames_[3]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[synthesisePopulation] += diff;
+		//end = std::chrono::steady_clock::now();
+		//diff = end - start;
+		//kernelExecuteTime_[synthesisePopulation] += diff;
 
 		//outputAudioFileTwo("testio.wav", &audioData_[0], objective.audioLength);
 
-		start = std::chrono::steady_clock::now();
-		fitness();
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[fitnessPopulation] += diff;
+		//start = std::chrono::steady_clock::now();
 
-		start = std::chrono::steady_clock::now();
+		cpuBenchmarker_.startTimer(kernelNames_[4]);
+		applyFFTWindow();
+		cpuBenchmarker_.pauseTimer(kernelNames_[4]);
+
+		cpuBenchmarker_.startTimer(kernelNames_[5]);
+		fft();
+		cpuBenchmarker_.pauseTimer(kernelNames_[5]);
+
+		cpuBenchmarker_.startTimer(kernelNames_[6]);
+		fitness();
+		cpuBenchmarker_.pauseTimer(kernelNames_[6]);
+
+		//end = std::chrono::steady_clock::now();
+		//diff = end - start;
+		//kernelExecuteTime_[fitnessPopulation] += diff;
+		//
+		//start = std::chrono::steady_clock::now();
+
+		cpuBenchmarker_.startTimer(kernelNames_[7]);
 		sort();
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[sortPopulation] += diff;
+		cpuBenchmarker_.pauseTimer(kernelNames_[7]);
+
+		cpuBenchmarker_.startTimer(kernelNames_[8]);
+		rotate();
+		cpuBenchmarker_.pauseTimer(kernelNames_[8]);
+
+		//end = std::chrono::steady_clock::now();
+		//diff = end - start;
+		//kernelExecuteTime_[sortPopulation] += diff;
 	}
 	void executeAllGenerations()
 	{
@@ -353,6 +401,10 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		cpuBenchmarker_.startTimer("Total Audio Analysis Time");
+		cpuBenchmarker_.pauseTimer("Total Audio Analysis Time");
+		cpuBenchmarker_.startTimer("Total Audio Analysis Time");
+
 		initRandomStates();
 		for (int i = 0; i < numChunks_; i++)
 		{
@@ -366,6 +418,18 @@ public:
 			printf("Audio chunk %d evaluated:\n", i);
 			printBest();
 		}
+
+		cpuBenchmarker_.pauseTimer("Total Audio Analysis Time");
+
+		cpuBenchmarker_.elapsedTimer(kernelNames_[1]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[2]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[3]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[4]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[5]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[6]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[7]);
+		cpuBenchmarker_.elapsedTimer(kernelNames_[8]);
+		cpuBenchmarker_.elapsedTimer("Total Audio Analysis Time");
 	}
 
 	//Audio files//

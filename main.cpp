@@ -110,6 +110,8 @@ int main(int argc, char* argv[])
 			args.es_args.pop.numParents = numParents;
 			args.es_args.pop.numOffspring = numOffspring;
 			args.es_args.pop.numDimensions = numDimensions;
+			args.es_args.pop.populationLength = numParents + numOffspring;
+			args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
 			args.es_args.numGenerations = numGenerations;
 			args.es_args.paramMin = paramMins;
 			args.es_args.paramMax = paramMaxs;
@@ -124,6 +126,8 @@ int main(int argc, char* argv[])
 			args.es_args.pop.numOffspring = numOffspring;
 			args.es_args.pop.numDimensions = numDimensions;
 			args.es_args.numGenerations = numGenerations;
+			args.es_args.pop.populationLength = numParents + numOffspring;
+			args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
 			args.es_args.paramMin = paramMins;
 			args.es_args.paramMax = paramMaxs;
 			args.es_args.audioLengthLog2 = audioLengthLog2;
@@ -142,6 +146,8 @@ int main(int argc, char* argv[])
 			Evolutionary_Strategy_Vulkan_Arguments args;
 			args.es_args.pop.numParents = numParents;
 			args.es_args.pop.numOffspring = numOffspring;
+			args.es_args.pop.populationLength = numParents + numOffspring;
+			args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
 			args.es_args.pop.numDimensions = numDimensions;
 			args.es_args.numGenerations = numGenerations;
 			args.es_args.paramMin = paramMins;
@@ -160,17 +166,18 @@ int main(int argc, char* argv[])
 			args.es_args.pop.numParents = numParents;
 			args.es_args.pop.numOffspring = numOffspring;
 			args.es_args.pop.numDimensions = numDimensions;
+			args.es_args.pop.populationLength = numParents + numOffspring;
+			args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
 			args.es_args.numGenerations = numGenerations;
 			args.es_args.paramMin = paramMins;
 			args.es_args.paramMax = paramMaxs;
 			args.es_args.audioLengthLog2 = audioLengthLog2;
-			args.localWorkspace = dim3(j["type"]["Vulkan"]["workgroupSize"], 1, 1);
+			args.localWorkspace = dim3(j["type"]["CUDA"]["workgroupSize"], 1, 1);
 
 			es = new Evolutionary_Strategy_CUDA(args);
-		}
 
-		//Initalize evolutionary strategy object and memory//
-		//Evolutionary_Strategy_OpenCL esOpenCL = Evolutionary_Strategy_OpenCL(numGenerations, numParents, numOffspring, numDimensions, paramMins, paramMaxs, "kernels/ocl_program.cl", audioLengthLog2);
+			Evolutionary_Strategy_CUDA::printAvailableDevices();
+		}
 
 		uint32_t populationValueSize = (numParents + numOffspring) * numDimensions;
 		uint32_t populationStepSize = (numParents + numOffspring ) * numDimensions;
@@ -186,7 +193,6 @@ int main(int argc, char* argv[])
 
 		uint32_t audioLength = 1 << audioLengthLog2;
 		float* outputAudioData = new float[audioLength*20];
-		//uint32_t fftLength = es->objective.fftOutSize;
 		uint32_t fftLength = audioLength;
 		float* fftAudioData = new float[fftLength];
 		float* fftTargetData = new float[fftLength];
@@ -209,44 +215,20 @@ int main(int argc, char* argv[])
 			outputAudioFile("inputGenerated.wav", targetAudio, (targetAudioLength));
 		}
 
-		//@ToDo - Need to write param min/maxs?//
-		//es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize* sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize* sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize* sizeof(float));
-		//es->readSynthesizerData(outputAudioData, audioLength*sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
-		float* testingValues = new float[populationValueSize];
-		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
-		for (int i = 0; i != 100; ++i)
-		{
-			//std::cout << i << ": " << (testingValues)[i] << std::endl;
-			//std::cout << i << ": " << (fftAudioData)[i] << std::endl;
-			//std::cout << i << ": " << (fftTargetData)[i] << std::endl;
-			//printf("%d: %f\n", i, (fftAudioData)[i]);
-		}
-
 		//Start total compute time//
 		std::chrono::time_point<std::chrono::steady_clock> start;
 		start = std::chrono::steady_clock::now();
 
 		es->parameterMatchAudio(targetAudio, targetAudioLength);
 
-		//Samples generated//
-		//float timeGenerated = (bufferSize*numBuffers) / sampleRate;
-		//std::cout << "Seconds of samples generated: " << timeGenerated << "s" << std::endl;
+		//Print total compute time//
+		auto end = std::chrono::steady_clock::now();
+		auto diff = end - start;
+		std::cout << "Total time to complete: " << std::chrono::duration<double>(diff).count() << "s" << std::endl;
+		std::cout << "Total time to complete: " << std::chrono::duration <double, std::milli>(diff).count() << "ms" << std::endl << std::endl;
 
-		//((Evolutionary_Strategy_Vulkan*)es)->initPopulationVK();
-
-		//es->setTargetFFT(targetAudio);
-		//es->executeAllGenerations();
-
-		//esOpenCL.executeGeneration();
-		//esOpenCL.executeGeneration();
-		//esOpenCL.executeGeneration();
-		//esOpenCL.executeMutate();
-		//esOpenCL.executeFitness();
-		//esOpenCL.executeSynthesise();
-
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		es->readPopulationDataStaging(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
-		es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
+		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
 		{
@@ -258,10 +240,10 @@ int main(int argc, char* argv[])
 			//printf("%d: %f\n", i, (outputAudioData)[i]);
 			//std::cout << i << ": " << inputPopulationValues[i + es->population.populationSize * *((Evolutionary_Strategy_Vulkan*)(es))->rotationIndex_] << std::endl;
 		}
-		std::cout << "Input value rotation check." << std::endl;
-		std::cout << inputPopulationValues[es->population.populationLength * 4 * 0] << std::endl;
-		std::cout << inputPopulationValues[es->population.populationLength * 4 * 1] << std::endl;
-		outputAudioFile("gpuOutput.wav", outputAudioData, audioLength*20);	//@ToDo - Why not working?
+		//std::cout << "Input value rotation check." << std::endl;
+		//std::cout << inputPopulationValues[es->population.populationLength * 4 * 0] << std::endl;
+		//std::cout << inputPopulationValues[es->population.populationLength * 4 * 1] << std::endl;
+		//outputAudioFile("gpuOutput.wav", outputAudioData, audioLength*20);	//@ToDo - Why not working?
 		
 		//float params[] = { 500.0f / paramMax[0], 8.0f / paramMax[1], 2500.0f / paramMax[2], 1.0f / paramMax[3] };
 		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
@@ -272,12 +254,6 @@ int main(int argc, char* argv[])
 
 		printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
 		es->printBest();
-
-		//Print total compute time//
-		auto end = std::chrono::steady_clock::now();
-		auto diff = end - start;
-		std::cout << "Total time to complete: " << std::chrono::duration<double>(diff).count() << "s" << std::endl;
-		std::cout << "Total time to complete: " << std::chrono::duration <double, std::milli>(diff).count() << "ms" << std::endl << std::endl;
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << std::endl;
