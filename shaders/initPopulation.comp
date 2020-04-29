@@ -83,6 +83,10 @@ layout(binding = 12) buffer rotationIndexBuffer
 {
    uint rotationIndexPayload;
 };
+layout(binding = 13) buffer wavetableBuffer
+{
+   float wavetablePayload[];
+};
 layout( push_constant ) uniform index{uint rotationIndex;} RotationIndex;
 
 layout (constant_id = 1) const uint WORKGROUP_X = 32;
@@ -133,7 +137,7 @@ void main()
     for(uint i = 0; i < NUM_DIMENSIONS; ++i)
     {
         inputPopulationStepPayload[populationStartIndex + (gid * NUM_DIMENSIONS + i)] = 0.1f;
-        float randomValue = float((MWC64X(randomStatesPayload[gid])) /  4294967296.0f);  //Should this just use index? Surely repeating 'random' values...
+        float randomValue = float((MWC64X(randomStatesPayload[gid])) /  2147483647.0f);  //Should this just use index? Surely repeating 'random' values...
         //randomValue = random(vec2(randomStatesPayload[gid].x /  4294967296.0, randomStatesPayload[gid].y/  4294967296.0));
         //float randomValue = float(randomStatesPayload[gid].x / 2147483647.0f);
         //float randomValue = random(randomStatesPayload[gid]);

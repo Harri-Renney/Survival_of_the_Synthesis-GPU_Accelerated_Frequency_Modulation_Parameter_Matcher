@@ -25,7 +25,7 @@
     },
 
     "type": {
-        "implementation": "OpenCL",
+        "implementation": "Vulkan",
         "OpenCL": {
             "workgroupSize": 16
         },

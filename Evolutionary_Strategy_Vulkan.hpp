@@ -13,6 +13,7 @@
 #include <glm\glm.hpp>
 
 #include "Evolutionary_Strategy.hpp"
+#include "Benchmarker.hpp"
 
 #include "Vulkan_Helper.hpp"
 
@@ -49,13 +50,13 @@ struct Specialization_Constants
 	uint32_t workgroupY = 1;
 	uint32_t workgroupZ = 1;
 	uint32_t workgroupSize = 32;
-	uint32_t numDimensions = 1024;
+	uint32_t numDimensions = 4;
 
 	uint32_t populationCount = 1536;
 	uint32_t numWorkgroupsPerParent = 1;	//population->num_parents / cl->work_group_size
 	uint32_t chunkSizeFitness = 1;
 
-	uint32_t audioWaveFormSize = 1;
+	uint32_t audioWaveFormSize = 1024;
 
 	uint32_t fftOutSize = 1;
 	uint32_t fftHalfSize = 1;
@@ -164,8 +165,8 @@ private:
 	std::vector<VkFence> fences_;
 
 	//Population Buffers//
-	static const int numBuffers_ = 13;
-	enum storageBufferNames_ { inputPopulationValueBuffer = 0, inputPopulationStepBuffer, inputPopulationFitnessBuffer, outputPopulationValueBuffer, outputPopulationStepBuffer, outputPopulationFitnessBuffer, randomStatesBuffer, paramMinBuffer, paramMaxBuffer, outputAudioBuffer, inputFFTDataBuffer, inputFFTTargetBuffer, rotationIndexBuffer };
+	static const int numBuffers_ = 14;
+	enum storageBufferNames_ { inputPopulationValueBuffer = 0, inputPopulationStepBuffer, inputPopulationFitnessBuffer, outputPopulationValueBuffer, outputPopulationStepBuffer, outputPopulationFitnessBuffer, randomStatesBuffer, paramMinBuffer, paramMaxBuffer, outputAudioBuffer, inputFFTDataBuffer, inputFFTTargetBuffer, rotationIndexBuffer, wavetableBuffer};
 	std::array<VkBuffer, numBuffers_> storageBuffers_;
 	std::array<VkDeviceMemory, numBuffers_> storageBuffersMemory_;
 	std::array<uint32_t, numBuffers_> storageBufferSizes_;
@@ -183,6 +184,10 @@ private:
 	VkBuffer stagingBufferDst;
 	VkDeviceMemory stagingBufferMemoryDst;
 	void* stagingBufferDstPointer;
+
+	Benchmarker vkBenchmarker_;
+
+	uint32_t rotationIndex_;
 
 	//Validation & Debug Variables//
 	VkDebugReportCallbackEXT debugReportCallback_;
@@ -329,9 +334,9 @@ private:
 	void initBuffersVK()
 	{
 		//Creating each buffer at time//
-		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationValueBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationValueBuffer], storageBuffersMemory_[inputPopulationValueBuffer]);
-		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationStepBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationStepBuffer], storageBuffersMemory_[inputPopulationStepBuffer]);
-		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationFitnessBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputPopulationFitnessBuffer], storageBuffersMemory_[inputPopulationFitnessBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationValueBuffer],   VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[inputPopulationValueBuffer], storageBuffersMemory_[inputPopulationValueBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationStepBuffer],    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[inputPopulationStepBuffer], storageBuffersMemory_[inputPopulationStepBuffer]);
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputPopulationFitnessBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[inputPopulationFitnessBuffer], storageBuffersMemory_[inputPopulationFitnessBuffer]);
 		
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputPopulationValueBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[outputPopulationValueBuffer], storageBuffersMemory_[outputPopulationValueBuffer]);
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[outputPopulationStepBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[outputPopulationStepBuffer], storageBuffersMemory_[outputPopulationStepBuffer]);
@@ -346,6 +351,8 @@ private:
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer]);
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[inputFFTTargetBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[inputFFTTargetBuffer], storageBuffersMemory_[inputFFTTargetBuffer]);
 		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[rotationIndexBuffer], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, storageBuffers_[rotationIndexBuffer], storageBuffersMemory_[rotationIndexBuffer]);
+
+		VKHelper::createBuffer(physicalDevice_, logicalDevice_, storageBufferSizes_[wavetableBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, storageBuffers_[wavetableBuffer], storageBuffersMemory_[wavetableBuffer]);
 
 		//Create Staging Buffer//
 		stagingBufferSrcSize_ = storageBufferSizes_[inputFFTDataBuffer];
@@ -688,8 +695,14 @@ private:
 		rotationIndexLayoutBinding.descriptorCount = 1;
 		rotationIndexLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
+		VkDescriptorSetLayoutBinding wavetableLayoutBinding = {};
+		wavetableLayoutBinding.binding = 13; // binding = 0
+		wavetableLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		wavetableLayoutBinding.descriptorCount = 1;
+		wavetableLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
 		//Layout create information from binding layouts//
-		std::array<VkDescriptorSetLayoutBinding, numBuffers_> bindings = { populationValueLayoutBinding, populationStepLayoutBinding, populationFitnessLayoutBinding, populationValueTempLayoutBinding, populationStepTempLayoutBinding, populationFitnessTempLayoutBinding, randStateLayoutBinding, paramMinLayoutBinding, paramMaxLayoutBinding, audioWaveLayoutBinding, FFTOutputLayoutBinding, FFTTargetLayoutBinding, rotationIndexLayoutBinding };
+		std::array<VkDescriptorSetLayoutBinding, numBuffers_> bindings = { populationValueLayoutBinding, populationStepLayoutBinding, populationFitnessLayoutBinding, populationValueTempLayoutBinding, populationStepTempLayoutBinding, populationFitnessTempLayoutBinding, randStateLayoutBinding, paramMinLayoutBinding, paramMaxLayoutBinding, audioWaveLayoutBinding, FFTOutputLayoutBinding, FFTTargetLayoutBinding, rotationIndexLayoutBinding, wavetableLayoutBinding };
 
 		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {};
 		descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -737,6 +750,8 @@ private:
 		poolSizes[11].descriptorCount = 1;
 		poolSizes[12].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		poolSizes[12].descriptorCount = 1;
+		poolSizes[13].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		poolSizes[13].descriptorCount = 1;
 
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {};
 		descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -941,15 +956,16 @@ private:
 		outputBuffer = cl::Buffer(context_, CL_MEM_READ_WRITE, storageBufferSizes_[inputFFTDataBuffer]);
 	}
 public:
-	uint32_t* rotationIndex_;
 	Evolutionary_Strategy_Vulkan(uint32_t aNumGenerations, uint32_t aNumParents, uint32_t aNumOffspring, uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
 		Evolutionary_Strategy(aNumGenerations, aNumParents, aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
+		vkBenchmarker_("vulkanlog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" })
 	{
 
 	}
 	Evolutionary_Strategy_Vulkan(Evolutionary_Strategy_Vulkan_Arguments args) :
 		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
+		vkBenchmarker_("vulkanlog.csv", { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
 		shaderNames_({ "initPopulation.spv", "recombinePopulation.spv", "mutatePopulation.spv", "SynthesisePopulation.spv", "applyWindowPopulation.spv", "VulkanFFT.spv", "fitnessPopulation.spv", "sortPopulation.spv", "rotatePopulation.spv" }),
 		workgroupX(args.workgroupX),
 		workgroupY(args.workgroupY),
@@ -972,11 +988,11 @@ public:
 		storageBufferSizes_[paramMaxBuffer] = population.numDimensions * sizeof(float);
 		storageBufferSizes_[outputAudioBuffer] = population.populationLength * objective.audioLength * sizeof(float);
 		storageBufferSizes_[rotationIndexBuffer] = sizeof(uint32_t);
+		storageBufferSizes_[wavetableBuffer] = objective.wavetableSize * sizeof(float);
 
-		rotationIndex_ = new uint32_t;
-		*rotationIndex_ = 0;
+		rotationIndex_ = 0;
 
-		initContextCL(1, 0);
+		initContextCL(0, 0);
 		initBuffersCL();
 		initCLFFT();
 
@@ -1001,8 +1017,8 @@ public:
 		pipelinesTemp = { computePipelines_[recombinePopulation], computePipelines_[mutatePopulation], computePipelines_[synthesisePopulation], computePipelines_[applyWindowPopulation] };
 		createCommandBuffer(commandPoolESOne_, commandBufferESOne_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESOne_);
 
-		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation], computePipelineLayouts_[rotatePopulation] };
-		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation], computePipelines_[rotatePopulation] };
+		pipelineLayoutsTemp = { computePipelineLayouts_[fitnessPopulation], computePipelineLayouts_[sortPopulation] };
+		pipelinesTemp = { computePipelines_[fitnessPopulation], computePipelines_[sortPopulation] };
 		createCommandBuffer(commandPoolESTwo_, commandBufferESTwo_, pipelineLayoutsTemp, pipelinesTemp, queryPoolESTwo_);
 
 		//createPopulationInitialiseCommandBuffer();
@@ -1011,6 +1027,9 @@ public:
 		initRandomStateBuffer();
 		writeLocalBuffer(storageBuffers_[paramMinBuffer], 4 * sizeof(float), (void*)objective.paramMins.data());
 		writeLocalBuffer(storageBuffers_[paramMaxBuffer], 4 * sizeof(float), (void*)objective.paramMaxs.data());
+
+		VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[wavetableBuffer], stagingBufferMemorySrc, objective.wavetable);
+		copyBuffer(stagingBufferSrc, storageBuffers_[wavetableBuffer], storageBufferSizes_[wavetableBuffer]);
 	}
 	void initCLFFT()
 	{
@@ -1060,27 +1079,12 @@ public:
 	}
 	void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
 	{
-		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, storageBuffersMemory_[inputPopulationValueBuffer], aInputPopulationValueData);
-		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, storageBuffersMemory_[outputPopulationValueBuffer], aOutputPopulationValueData);
-		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, storageBuffersMemory_[inputPopulationStepBuffer], aInputPopulationStepData);
-		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, storageBuffersMemory_[outputPopulationStepBuffer], aOutputPopulationStepData);
-		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[inputPopulationFitnessBuffer], aInputPopulationFitnessData);
-		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, storageBuffersMemory_[outputPopulationFitnessBuffer], aOutputPopulationFitnessData);
-	}
-	void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
-	{
 		copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBufferDst, aPopulationValueSize);
 		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemoryDst, aInputPopulationValueData);
-		copyBuffer(storageBuffers_[outputPopulationValueBuffer], stagingBufferDst, aPopulationValueSize);
-		VKHelper::readBuffer(logicalDevice_, aPopulationValueSize, stagingBufferMemoryDst, aOutputPopulationValueData);
-		copyBuffer(storageBuffers_[inputPopulationStepBuffer], stagingBufferDst, aPopulationValueSize);
+		copyBuffer(storageBuffers_[inputPopulationStepBuffer], stagingBufferDst, aPopulationStepSize);
 		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemoryDst, aInputPopulationStepData);
-		copyBuffer(storageBuffers_[outputPopulationStepBuffer], stagingBufferDst, aPopulationValueSize);
-		VKHelper::readBuffer(logicalDevice_, aPopulationStepSize, stagingBufferMemoryDst, aOutputPopulationStepData);
-		copyBuffer(storageBuffers_[inputPopulationFitnessBuffer], stagingBufferDst, aPopulationValueSize);
+		copyBuffer(storageBuffers_[inputPopulationFitnessBuffer], stagingBufferDst, aPopulationFitnessSize);
 		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemoryDst, aInputPopulationFitnessData);
-		copyBuffer(storageBuffers_[outputPopulationFitnessBuffer], stagingBufferDst, aPopulationValueSize);
-		VKHelper::readBuffer(logicalDevice_, aPopulationFitnessSize, stagingBufferMemoryDst, aOutputPopulationFitnessData);
 	}
 
 	void writeSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
@@ -1142,13 +1146,17 @@ public:
 		//VKHelper::writeBuffer(logicalDevice_, storageBufferSizes_[inputFFTDataBuffer], storageBuffersMemory_[inputFFTDataBuffer], populationFFTData);
 
 		VKHelper::runCommandBuffer(logicalDevice_, computeQueue_, commandBufferESTwo_);
+
+		vkBenchmarker_.startTimer(shaderNames_[8]);
+		rotationIndex_ = (rotationIndex_ == 0 ? 1 : 0);
+		VKHelper::writeBuffer(logicalDevice_, sizeof(uint32_t), storageBuffersMemory_[rotationIndexBuffer], &rotationIndex_);
+		vkBenchmarker_.pauseTimer(shaderNames_[8]);
 	}
 	void executeAllGenerations()
 	{
-		*rotationIndex_ = 0;
+		rotationIndex_ = 0;
 		for (uint32_t i = 0; i != numGenerations; ++i)
 		{
-			//initRandomStateBuffer();
 			executeGeneration();
 			//*rotationIndex_ = (*rotationIndex_ == 0 ? 1 : 0);
 			//
@@ -1164,51 +1172,42 @@ public:
 			vkGetQueryPoolResults(logicalDevice_, queryPoolInit_, 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			uint64_t diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[0] += diff / (float)1e6;
-			//printf("Timestamp information [%d]: %f\n", 0, diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[1] += diff / (float)1e6;
-			//printf("Timestamp information [%d]: %f\n", 1, diff / (float)1e6);
+			vkBenchmarker_.addTimer(shaderNames_[1], diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[2] += diff / (float)1e6;
-			//printf("Timestamp information [%d]: %f\n", 2, diff / (float)1e6);
+			vkBenchmarker_.addTimer(shaderNames_[2], diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[3] += diff / (float)1e6;
-			//printf("Timestamp information [%d]: %f\n", 3, diff / (float)1e6);
+			vkBenchmarker_.addTimer(shaderNames_[3], diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[3], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[4] += diff / (float)1e6;
-			//printf("Timestamp information [%d]: %f\n", 4, diff / (float)1e6);
-
-			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT);
-			//vkGetQueryPoolResults(logicalDevice_, queryPoolESOne_[4], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT);
-			//diff = timestamp[1] - timestamp[0];
-			//shaderExecuteTime_[5] += diff / (float)1e6;
+			vkBenchmarker_.addTimer(shaderNames_[4], diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[0], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[6] += diff / (float)1e6;
+			vkBenchmarker_.addTimer(shaderNames_[6], diff / (float)1e6);
 
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[1], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 			diff = timestamp[1] - timestamp[0];
 			shaderExecuteTime_[7] += diff / (float)1e6;
-
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 0, 1, sizeof(uint64_t), &(timestamp[0]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-			vkGetQueryPoolResults(logicalDevice_, queryPoolESTwo_[2], 1, 1, sizeof(uint64_t), &(timestamp[1]), 0, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-			diff = timestamp[1] - timestamp[0];
-			shaderExecuteTime_[8] += diff / (float)1e6;
+			vkBenchmarker_.addTimer(shaderNames_[7], diff / (float)1e6);
 		}
 
 		float totalKernelRunTime = 0.0;
@@ -1224,6 +1223,7 @@ public:
 	{
 		chunkSize = objective.audioLength;
 		chunks = aTargetAudioLength / chunkSize;
+		
 
 		for (int i = 0; i < chunks; i++)
 		{
@@ -1236,10 +1236,22 @@ public:
 			uint32_t tempSize = 4 * sizeof(float);
 			float* tempData = new float[4];
 			float tempFitness;
-			VKHelper::readBuffer(logicalDevice_, tempSize, storageBuffersMemory_[inputPopulationValueBuffer], tempData);
-			VKHelper::readBuffer(logicalDevice_, sizeof(float), storageBuffersMemory_[inputPopulationFitnessBuffer], &tempFitness);
+			copyBuffer(storageBuffers_[inputPopulationValueBuffer], stagingBufferDst, tempSize);
+			VKHelper::readBuffer(logicalDevice_, tempSize, stagingBufferMemoryDst, tempData);
+			//VKHelper::readBuffer(logicalDevice_, tempSize, storageBuffersMemory_[inputPopulationValueBuffer], tempData);
+			copyBuffer(storageBuffers_[inputPopulationFitnessBuffer], stagingBufferDst, sizeof(float));
+			VKHelper::readBuffer(logicalDevice_, sizeof(float), stagingBufferMemoryDst, &tempFitness);
+			//VKHelper::readBuffer(logicalDevice_, sizeof(float), storageBuffersMemory_[inputPopulationFitnessBuffer], &tempFitness);
 			printf("Generation %d parameters:\n Param0 = %f\n Param1 = %f\n Param2 = %f\n Param3 = %f\nFitness=%f\n\n\n", i, tempData[0] * 3520.0, tempData[1] * 8.0, tempData[2] * 3520.0, tempData[3] * 1.0, tempFitness);
 		}
+		vkBenchmarker_.elapsedTimer(shaderNames_[1]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[2]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[3]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[4]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[5]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[6]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[7]);
+		vkBenchmarker_.elapsedTimer(shaderNames_[8]);
 	}
 	void executeOpenCLFFT()
 	{
