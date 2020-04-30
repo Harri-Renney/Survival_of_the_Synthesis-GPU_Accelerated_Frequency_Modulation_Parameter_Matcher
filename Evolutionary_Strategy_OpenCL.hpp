@@ -199,7 +199,7 @@ public:
 			cl::Platform platform(*it);
 
 			cl_context_properties contextProperties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)(platform)(), 0 };
-			context_ = cl::Context(CL_DEVICE_AVAILABLE, contextProperties);
+			context_ = cl::Context(CL_DEVICE_TYPE_GPU, contextProperties);
 		
 			cl::vector<cl::Device> devices = context_.getInfo<CL_CONTEXT_DEVICES>();
 		
@@ -505,14 +505,14 @@ public:
 			//	auto diff = end - start;
 			//	kernelExecuteTime_[idx] += diff;
 			//}
-			//else if (idx == applyWindowPopulation)
-			//{
-			//	cl::Kernel currentKernel = *iter;
-			//	clBenchmarker_.startTimer(kernelNames_[idx]);
-			//	commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, 1024, workgroupSize, NULL);
-			//	commandQueue_.finish();
-			//	clBenchmarker_.pauseTimer(kernelNames_[idx]);
-			//}
+			else if (idx == applyWindowPopulation)
+			{
+				cl::Kernel currentKernel = *iter;
+				clBenchmarker_.startTimer(kernelNames_[idx]);
+				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, objective.audioLength, workgroupSize, NULL);
+				commandQueue_.finish();
+				clBenchmarker_.pauseTimer(kernelNames_[idx]);
+			}
 			//else if (idx == mutatePopulation)
 			//{
 			//	cl::Kernel currentKernel = *iter;

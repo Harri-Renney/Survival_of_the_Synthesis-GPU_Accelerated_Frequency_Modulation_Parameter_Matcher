@@ -135,7 +135,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
-			args.deviceType = NVIDIA;
+			args.deviceType = DISCRETE;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
