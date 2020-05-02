@@ -16,7 +16,7 @@
 
     "evolutionary": {
         "numParents": 0,
-        "numOffspring": 2048,
+        "numOffspring": 1024,
         "numDimensions": 4,
         "paramMins": [0.0, 0.0, 0.0, 0.0],
         "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
@@ -27,7 +27,7 @@
     "type": {
         "implementation": "OpenCL",
         "OpenCL": {
-            "workgroupSize": 256
+            "workgroupSize": 32
         },
         "Vulkan": {
 			"workgroupSize": 32
