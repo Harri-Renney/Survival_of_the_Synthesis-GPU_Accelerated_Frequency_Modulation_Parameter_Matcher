@@ -505,14 +505,14 @@ public:
 			//	auto diff = end - start;
 			//	kernelExecuteTime_[idx] += diff;
 			//}
-			//else if (idx == applyWindowPopulation)
-			//{
-			//	cl::Kernel currentKernel = *iter;
-			//	clBenchmarker_.startTimer(kernelNames_[idx]);
-			//	commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, 1024, workgroupSize, NULL);
-			//	commandQueue_.finish();
-			//	clBenchmarker_.pauseTimer(kernelNames_[idx]);
-			//}
+			else if (idx == applyWindowPopulation)
+			{
+				cl::Kernel currentKernel = *iter;
+				clBenchmarker_.startTimer(kernelNames_[idx]);
+				commandQueue_.enqueueNDRangeKernel(currentKernel, cl::NullRange, 1024, workgroupSize, NULL);
+				commandQueue_.finish();
+				clBenchmarker_.pauseTimer(kernelNames_[idx]);
+			}
 			//else if (idx == mutatePopulation)
 			//{
 			//	cl::Kernel currentKernel = *iter;
