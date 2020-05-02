@@ -16,7 +16,7 @@
 
     "evolutionary": {
         "numParents": 0,
-        "numOffspring": 16384,
+        "numOffspring": 1024,
         "numDimensions": 4,
         "paramMins": [0.0, 0.0, 0.0, 0.0],
         "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
@@ -32,8 +32,8 @@
         "Vulkan": {
 			"workgroupSize": 32
         },
-		"CUDA": {
-			"workgroupSize": 32 
+        "CUDA": {
+			"workgroupSize": 32
         },
         "input": "params",
         "params": [1450.0, 3.0, 200.0, 1.0],

@@ -135,7 +135,7 @@ int main(int argc, char* argv[])
 			args.workgroupY = 1;
 			args.workgroupZ = 1;
 			args.kernelSourcePath = "kernels/ocl_program.cl";
-			args.deviceType = NVIDIA;
+			args.deviceType = DISCRETE;
 
 			es = new Evolutionary_Strategy_OpenCL(args);
 
@@ -236,7 +236,7 @@ int main(int argc, char* argv[])
 			//std::cout << i << ": " << (fftAudioData)[i] << std::endl;
 			//std::cout << i << ": " << (fftTargetData)[i] << std::endl;
 			//printf("%d: %f\n", i, (inputPopulationFitness)[i]);
-			//printf("%d: %f\n", i, (inputPopulationValues)[i]);
+			printf("%d: %f\n", i, (inputPopulationValues)[i]);
 			//printf("%d: %f\n", i, (outputAudioData)[i]);
 			//std::cout << i << ": " << inputPopulationValues[i + es->population.populationSize * *((Evolutionary_Strategy_Vulkan*)(es))->rotationIndex_] << std::endl;
 		}
