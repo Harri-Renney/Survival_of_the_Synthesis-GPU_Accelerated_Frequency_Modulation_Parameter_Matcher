@@ -270,7 +270,7 @@ __kernel void mutatePopulation(__global float* in_population_values,
 __kernel void synthesisePopulation(__global float* out_audio_waves,
                           __global float* in_population_values,
                           __constant float* param_mins, __constant float* param_maxs,
-                                     __global uint* rotationIndex)
+                                     __global uint* rotationIndex, __global float* wavetable)
 {
     int index = get_global_id(0);
     int local_index = get_local_id(0);

@@ -10,24 +10,24 @@
 
     "audio": {
         "sampleRate": 44100,
-        "audioLengthLog2": 10,
-        "wavetableSize": 32768
+        "audioLengthLog2": 11,
+        "wavetableSize": 327680
     },
 
     "evolutionary": {
         "numParents": 0,
-        "numOffspring": 1024,
+        "numOffspring": 8192,
         "numDimensions": 4,
         "paramMins": [0.0, 0.0, 0.0, 0.0],
         "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
         "fitnessThreshold": 0.00001,
-        "numGenerations": 100
+        "numGenerations": 10000
     },
 
     "type": {
         "implementation": "OpenCL",
         "OpenCL": {
-            "workgroupSize": 256
+            "workgroupSize": 32
         },
         "Vulkan": {
 			"workgroupSize": 32

@@ -579,6 +579,8 @@ public:
 		clBenchmarker_.startTimer("Total Audio Analysis Time");
 
 		initRandomStateCL();
+		initPopulationCL();
+		executeAllGenerations();
 		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
