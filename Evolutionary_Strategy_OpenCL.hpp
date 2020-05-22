@@ -87,7 +87,6 @@ private:
 	Benchmarker clBenchmarker_;
 
 	const std::string compilerArguments_ =
-		"-cl-fast-relaxed-math "
 		"-D WRKGRPSIZE=%d "
 		"-D NUM_DIMENSIONS=%d "
 		"-D AUDIO_WAVE_FORM_SIZE=%d "
@@ -574,18 +573,18 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		initRandomStateCL();
+		initPopulationCL();
+		//executeAllGenerations();
+
 		clBenchmarker_.startTimer("Total Audio Analysis Time");
 		clBenchmarker_.pauseTimer("Total Audio Analysis Time");
 		clBenchmarker_.startTimer("Total Audio Analysis Time");
 
-		initRandomStateCL();
-		initPopulationCL();
-		executeAllGenerations();
 		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
-			//initKernelArgumentsCL();
 			
 			initPopulationCL();
 

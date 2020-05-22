@@ -405,13 +405,13 @@ private:
 
 			//Check if VK_LAYER_LUNARG_standard_validation is among supported layers//
 			bool foundLayer = false;
-			if (std::find_if(layerProperties.begin(), layerProperties.end(), [](const VkLayerProperties& m) -> bool { return strcmp(m.layerName, "VK_LAYER_LUNARG_standard_validation"); }) != layerProperties.end())
+			if (std::find_if(layerProperties.begin(), layerProperties.end(), [](const VkLayerProperties& m) -> bool { return strcmp(m.layerName, "VK_LAYER_KHRONOS_validation"); }) != layerProperties.end())
 				foundLayer = true;
 
 			if (!foundLayer) {
-				throw std::runtime_error("Layer VK_LAYER_LUNARG_standard_validation not supported\n");
+				throw std::runtime_error("Layer VK_LAYER_KHRONOS_validation not supported\n");
 			}
-			enabledValidationLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+			enabledValidationLayers.push_back("VK_LAYER_KHRONOS_validation");
 
 			/*
 				We need to enable an extension named VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
@@ -441,7 +441,7 @@ private:
 		applicationInfo.applicationVersion = 0;
 		applicationInfo.pEngineName = "VkSoundMatch";
 		applicationInfo.engineVersion = 0;
-		applicationInfo.apiVersion = VK_MAKE_VERSION(1,2,0);
+		applicationInfo.apiVersion = VK_API_VERSION_1_2;
 
 		VkInstanceCreateInfo createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

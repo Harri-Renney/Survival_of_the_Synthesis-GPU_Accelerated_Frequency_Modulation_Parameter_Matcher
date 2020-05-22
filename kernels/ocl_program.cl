@@ -281,16 +281,6 @@ __kernel void synthesisePopulation(__global float* out_audio_waves,
     const int pop_index = local_index * NUM_DIMENSIONS;
     float params_scaled[4];
 
-    //@ToDo - This looks like it laods all population value into local memory, calculates all values scaling, but only synthesises the first/one audio wave from first set of params?
-
-    /* Fill a local array with population values, 1 per workitem */
-    __local float group_population_values[WRKGRPSIZE * NUM_DIMENSIONS];
-    for(int i = 0; i < NUM_DIMENSIONS; i++)
-    {
-        group_population_values[WRKGRPSIZE * i + local_index] = in_population_values[populationStartIndex + (WRKGRPSIZE *
-                NUM_DIMENSIONS * group_index + WRKGRPSIZE * i + local_index)];
-    }
-
     /* Scale the synthesis parameters */
     for(int i = 0; i < NUM_DIMENSIONS; i++)
     {
@@ -306,18 +296,6 @@ __kernel void synthesisePopulation(__global float* out_audio_waves,
     float wave_table_pos_2 = 0.0f;
 
     float cur_sample;
-
-    /* Local array to hold the current chunk of output for each work item */
-    __local float audio_chunks[WRKGRPSIZE * CHUNK_SIZE_SYNTH];  //Need this? Again, another needless loop required to load back from group to global mem?
-
-    int local_id_mod_chunk = local_index % CHUNK_SIZE_SYNTH;
-
-    /* As the chunk size can be smaller than the workgroup size, we need to know which chunk this work item operates on. */
-    int local_chunk_index = local_index / CHUNK_SIZE_SYNTH;
-
-    /* Current index to write back to global memory coelesced. Initialise for the first iteration. */
-    int out_index = (AUDIO_WAVE_FORM_SIZE * (WRKGRPSIZE * group_index + local_chunk_index)) +
-                    local_id_mod_chunk;
 
     const float wavetableIncrementOne = (WAVETABLE_SIZE / 44100.0) * params_scaled[0];
 

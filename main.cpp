@@ -227,7 +227,7 @@ int main(int argc, char* argv[])
 		std::cout << "Total time to complete: " << std::chrono::duration<double>(diff).count() << "s" << std::endl;
 		std::cout << "Total time to complete: " << std::chrono::duration <double, std::milli>(diff).count() << "ms" << std::endl << std::endl;
 
-		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
@@ -249,11 +249,11 @@ int main(int argc, char* argv[])
 		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
 		std::vector<float> bestParamsScaled = es->objective.scaleParams(bestParamsUnscaled);
 		float* audioBuffer = new float[1 << 14];	//Why need this much memory?
-		obj.synthesiseAudio(bestParamsUnscaled, audioBuffer);
-		outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
+		//obj.synthesiseAudio(bestParamsUnscaled, audioBuffer);
+		//outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
 
-		printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
-		es->printBest();
+		//printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
+		//es->printBest();
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << std::endl;
