@@ -6,15 +6,18 @@
 #include <chrono>
 #include <math.h>
 #include <glm/glm.hpp>
+#include <array>
 
 #include <cuda.h>
 #include <helper_cuda.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <helper_functions.h> 
 #include <cufft.h>
 #include <iostream>
 
 #include "Evolutionary_Strategy.hpp"
+#include "Benchmarker.hpp"
 
 struct Evolutionary_Strategy_CUDA_Arguments
 {
@@ -29,21 +32,44 @@ struct Evolutionary_Strategy_CUDA_Arguments
 
 namespace CUDA_Kernels
 {
+	__constant__ int POPULATION_COUNT = 1536;
+	__constant__ int POPULATION_SIZE = 1536 * (4);
+	__constant__ const int NUM_DIMENSIONS = 4;
+	__constant__ const int NUM_WGS_FOR_PARENTS = 6;
+
+	__constant__ const int CHUNK_SIZE_FITNESS = (32 / 2);
+	__constant__ int AUDIO_WAVE_FORM_SIZE = 1024;
+	__constant__ const int CHUNKS_PER_WG_SYNTH = 1;
+	__constant__ const int CHUNK_SIZE_SYNTH = 32 / 1;
+	__constant__ const float ONE_OVER_SAMPLE_RATE_TIMES_2_PI = 0.00014247573;
+
+	__constant__ int FFT_OUT_SIZE = 1026;
+	__constant__ int FFT_HALF_SIZE = 512;
+	__constant__ float FFT_ONE_OVER_SIZE = 1 / 1026.0;
+	__constant__ const float FFT_ONE_OVER_WINDOW_FACTOR = 1.0;
+
+	__constant__ const float ALPHA = 1.4;
+	__constant__ const float ONE_OVER_ALPHA = 1 / 1.4;
+	__constant__ const float ROOT_TWO_OVER_PI = 0.797884524;
+	__constant__ const float BETA_SCALE = 0.25;
+	__constant__ const float BETA = 0.5;
+	__constant__ int WAVETABLE_SIZE = 32768;
+
+	void setConstants(uint32_t& aPopulationCount, uint32_t& aPopulationSize, uint32_t& aNumDimensions, uint32_t& aAudioWaveformSize, uint32_t& aFFTSize, uint32_t& aFFTHalfSize, float& aFFTOneOverSize, const uint32_t& aWavetableSize);
+
 	void initPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, float* aPopulationFitness, uint2* const aRandState, uint32_t aRotationIndex);
 
 	void recombinePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, uint32_t aRotationIndex);
 
 	void mutatePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, uint2* rand_state, uint32_t aRotationIndex);
 
-	void synthesisePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aOutputAudioWaves, const float* aParamMins, const float* aParamMaxs, uint32_t aRotationIndex);
+	void synthesisePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aOutputAudioWaves, const float* aParamMins, const float* aParamMaxs, const float* aWavetable, uint32_t aRotationIndex);
 
 	void applyWindowPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aAudioWaves);
 
 	void fitnessPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationFitness, float* aAudioWaveFFT, float* aTargetFFT, uint32_t aRotationIndex);
 
 	void sortPopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, float* aPopulationFitness, uint32_t aRotationIndex);
-
-	void rotatePopulationExecute(dim3 aGlobalSize, dim3 aLocalSize, float* aPopulationValues, float* aPopulationSteps, float* aPopulationFitness, uint32_t aRotationIndex);
 }
 
 class Evolutionary_Strategy_CUDA : public Evolutionary_Strategy
@@ -88,27 +114,46 @@ private:
 	float cudaTimeElapsed = 0.0f;
 
 	static const uint8_t numKernels_ = 9;
-	enum kernelNames_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, cudaFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	enum kernels_ { initPopulation = 0, recombinePopulation, mutatePopulation, synthesisePopulation, applyWindowPopulation, cudaFFT, fitnessPopulation, sortPopulation, copyPopulation };
+	std::array<std::string, numKernels_> kernelNames_;
 	std::chrono::nanoseconds kernelExecuteTime_[numKernels_];
+
+	Benchmarker cudaBenchmarker_;
 public:
 	Evolutionary_Strategy_CUDA(Evolutionary_Strategy_CUDA_Arguments args) :
-	Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
-	kernelSourcePath_(args.kernelSourcePath),
-	globalWorkspace_(dim3(population.populationLength, 1, 1)),
-	localWorkspace_(args.localWorkspace)
+		Evolutionary_Strategy(args.es_args.numGenerations, args.es_args.pop.numParents, args.es_args.pop.numOffspring, args.es_args.pop.numDimensions, args.es_args.paramMin, args.es_args.paramMax, args.es_args.audioLengthLog2),
+		cudaBenchmarker_(std::string("cudalog(pop=" + std::to_string(args.es_args.pop.populationLength) + "gens=" + std::to_string(args.es_args.numGenerations) + "audioBlockSize=" + std::to_string(1 << args.es_args.audioLengthLog2) + ").csv"), { "Test_Name", "Total_Time", "Average_Time", "Max_Time", "Min_Time", "Max_Difference", "Average_Difference" }),
+		kernelSourcePath_(args.kernelSourcePath),
+		globalWorkspace_(dim3(population.populationLength, 1, 1)),
+		localWorkspace_(args.localWorkspace),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "cudaFFT", "fitnessPopulation", "sortPopulation", "copyPopulation" })
 	{
 		//Set sizes//
 		//targetFFTSize = objective.fftHalfSize * sizeof(float);
 
 		//Create device buffers//
 		//cudaMalloc((void**)&devicetargetFFT, targetFFTSize);
-		
+
 		initCudaFFT();
 		init();
 	}
 
+	~Evolutionary_Strategy_CUDA()
+	{
+		cufftDestroy(fftplan_);
+		cudaFree(devicePopulationValueBuffer_);
+		cudaFree(devicePopulationStepBuffer_);
+		cudaFree(devicePopulationFitnessBuffer_);
+		cudaFree(deviceRandomStatesBuffer_);
+		cudaFree(deviceParamMinBuffer_);
+		cudaFree(deviceParamMaxBuffer_);
+		cudaFree(deviceGeneratedAudioBuffer_);
+		cudaFree(deviceRoationIndex_);
+		cudaFree(deviceWavetableBuffer_);
+	}
+
 	void init()
-	{	
+	{
 		//@ToDo - Allocate the correct kind of memory for device//
 		cudaMalloc((void**)&devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2);
 		cudaMalloc((void**)&devicePopulationStepBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2);
@@ -117,7 +162,7 @@ public:
 		cudaMalloc((void**)&deviceParamMinBuffer_, population.numDimensions * sizeof(float));
 		cudaMalloc((void**)&deviceParamMaxBuffer_, population.numDimensions * sizeof(float));
 		cudaMalloc((void**)&deviceGeneratedAudioBuffer_, population.populationLength * objective.audioLength * sizeof(float));
-		cudaMalloc((void**)&deviceRoationIndex_, sizeof(uint32_t));
+		cudaMallocHost((void**)&deviceRoationIndex_, sizeof(uint32_t));
 		cudaMalloc((void**)&deviceWavetableBuffer_, objective.wavetableSize * sizeof(float));
 
 		targetFFT_ = new float[objective.fftHalfSize];
@@ -125,6 +170,9 @@ public:
 		//Load parameter min & max//
 		cudaMemcpy(deviceParamMinBuffer_, &objective.paramMins.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(deviceParamMaxBuffer_, &objective.paramMaxs.front(), population.numDimensions * sizeof(float), cudaMemcpyHostToDevice);
+
+		//Load generated wavetable to GPU//
+		cudaMemcpy(deviceWavetableBuffer_, objective.wavetable, objective.wavetableSize * sizeof(float), cudaMemcpyHostToDevice);
 
 		initDeviceMemory();
 	}
@@ -161,8 +209,6 @@ public:
 	{
 		cufftExecR2C(fftplan_, deviceGeneratedAudioBuffer_, reinterpret_cast<cufftComplex *>(deviceGeneratedFFTBuffer_));
 		cudaDeviceSynchronize();
-		//cufftDestroy(plan);
-		//cudaFree(data);
 	}
 
 	void initPopulationCUDA()
@@ -174,9 +220,6 @@ public:
 		//Run initialise population kernel//
 		CUDA_Kernels::initPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, deviceRandomStatesBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
-
-		float* tempBuffer = new float[population.populationLength * population.numDimensions * 2];
-		cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
 	}
 
 	void initRandomStateCUDA()
@@ -214,112 +257,50 @@ public:
 
 	void executeGeneration()
 	{
-		std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
-
+		cudaBenchmarker_.startTimer(kernelNames_[1]);
 		CUDA_Kernels::recombinePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, rotationIndex_);
-		//cudaDeviceSynchronize();
-		
-		auto end = std::chrono::steady_clock::now();
-		auto diff = end - start;
-		kernelExecuteTime_[recombinePopulation] += diff;
+		cudaDeviceSynchronize();
+		cudaBenchmarker_.pauseTimer(kernelNames_[1]);
 
-		//float* tempBuffer = new float[population.populationLength * population.numDimensions * 2];
-		//cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
-
-		//printBest();
-
-		start = std::chrono::steady_clock::now();
-
+		cudaBenchmarker_.startTimer(kernelNames_[2]);
 		CUDA_Kernels::mutatePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, deviceRandomStatesBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
+		cudaBenchmarker_.pauseTimer(kernelNames_[2]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[mutatePopulation] += diff;
-
-		//cudaMemcpy(tempBuffer, devicePopulationValueBuffer_, population.populationLength * population.numDimensions * sizeof(float) * 2, cudaMemcpyDeviceToHost);
-
-		//printBest();
-
-		start = std::chrono::steady_clock::now();
-
-		CUDA_Kernels::synthesisePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, deviceGeneratedAudioBuffer_, deviceParamMinBuffer_, deviceParamMaxBuffer_, rotationIndex_);
+		cudaBenchmarker_.startTimer(kernelNames_[3]);
+		CUDA_Kernels::synthesisePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, deviceGeneratedAudioBuffer_, deviceParamMinBuffer_, deviceParamMaxBuffer_, deviceWavetableBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
+		cudaBenchmarker_.pauseTimer(kernelNames_[3]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[synthesisePopulation] += diff;
-
-		//float* tempAudioBuffer = new float[population.populationLength * objective.audioLength];
-		//cudaMemcpy(tempAudioBuffer, deviceGeneratedAudioBuffer_, population.populationLength * objective.audioLength * sizeof(float), cudaMemcpyDeviceToHost);
-
-		//printBest();
-
-		start = std::chrono::steady_clock::now();
-
+		cudaBenchmarker_.startTimer(kernelNames_[4]);
 		CUDA_Kernels::applyWindowPopulationExecute(globalWorkspace_, localWorkspace_, deviceGeneratedAudioBuffer_);
 		cudaDeviceSynchronize();
-
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[applyWindowPopulation] += diff;
-
-		//cudaMemcpy(tempAudioBuffer, deviceGeneratedAudioBuffer_, population.populationLength * objective.audioLength * sizeof(float), cudaMemcpyDeviceToHost);
-
-		start = std::chrono::steady_clock::now();
+		cudaBenchmarker_.pauseTimer(kernelNames_[4]);
 
 		//CudaFFT//
+		cudaBenchmarker_.startTimer(kernelNames_[5]);
 		executeCudaFFT();
+		cudaBenchmarker_.pauseTimer(kernelNames_[5]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[cudaFFT] += diff;
-
-		//float* tempFFTBuffer = new float[population.populationLength * objective.fftOutSize];
-		//cudaMemcpy(tempFFTBuffer, deviceGeneratedFFTBuffer_, population.populationLength * objective.fftOutSize * sizeof(float), cudaMemcpyDeviceToHost);
-
-		start = std::chrono::steady_clock::now();
-
-		//@ToDo - Make sure updated targetFFT and generatedFFT.
+		cudaBenchmarker_.startTimer(kernelNames_[6]);
 		CUDA_Kernels::fitnessPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationFitnessBuffer_, deviceGeneratedFFTBuffer_, deviceTargetFFTBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
+		cudaBenchmarker_.pauseTimer(kernelNames_[6]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[fitnessPopulation] += diff;
-
-		start = std::chrono::steady_clock::now();
-
-		//float* tempFitnessBuffer = new float[population.populationLength * 2];
-		//cudaMemcpy(tempFitnessBuffer, devicePopulationFitnessBuffer_, population.populationLength * sizeof(float) * 2, cudaMemcpyDeviceToHost);
-
+		cudaBenchmarker_.startTimer(kernelNames_[7]);
 		CUDA_Kernels::sortPopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, rotationIndex_);
 		cudaDeviceSynchronize();
+		cudaBenchmarker_.pauseTimer(kernelNames_[7]);
 
-		end = std::chrono::steady_clock::now();
-		diff = end - start;
-		kernelExecuteTime_[sortPopulation] += diff;
-
-		//printBest();
-
-		//@ToDo - Really need to run a kernel for this? Just rotatethe index host side!
-		//CUDA_Kernels::rotatePopulationExecute(globalWorkspace_, localWorkspace_, devicePopulationValueBuffer_, devicePopulationStepBuffer_, devicePopulationFitnessBuffer_, rotationIndex_);
+		cudaBenchmarker_.startTimer(kernelNames_[8]);
 		rotationIndex_ = (rotationIndex_ == 0 ? 1 : 0);
-
-		//delete tempBuffer;
-		//delete tempAudioBuffer;
+		cudaBenchmarker_.pauseTimer(kernelNames_[8]);
 	}
 	void executeAllGenerations()
 	{
 		for (uint32_t i = 0; i != numGenerations; ++i)
 		{
 			executeGeneration();
-		}
-		for (uint32_t i = 0; i != numKernels_; ++i)
-		{
-			std::chrono::duration<double> executeTime = std::chrono::duration<double>(kernelExecuteTime_[i]);
-			//executeTime = executeTime / numGenerations;
-			std::cout << "Time to complete kernel " << i << ": " << kernelExecuteTime_[i].count() / (float)1e6 << "ms\n";
 		}
 	}
 	void parameterMatchAudio(float* aTargetAudio, uint32_t aTargetAudioLength)
@@ -328,13 +309,20 @@ public:
 		chunkSize_ = objective.audioLength;
 		numChunks_ = aTargetAudioLength / chunkSize_;
 
+		uint32_t modifiedFFTSize = objective.fftSize + 2;
+		float modifiedFFTOneOverSize = 1 / (float)(objective.fftSize + 2);
+		CUDA_Kernels::setConstants(population.populationLength, population.populationSize, population.numDimensions, objective.audioLength, modifiedFFTSize, objective.fftHalfSize, modifiedFFTOneOverSize, objective.wavetableSize);
+
+		cudaBenchmarker_.startTimer("Total Audio Analysis Time");
+		cudaBenchmarker_.pauseTimer("Total Audio Analysis Time");
+		cudaBenchmarker_.startTimer("Total Audio Analysis Time");
+
 		initRandomStateCUDA();
-		for (int i = 0; i < numChunks_-1; i++)
+		for (int i = 0; i < numChunks_; i++)
 		{
 			//Initialise target audio and new population//
 			setTargetAudio(&aTargetAudio[chunkSize_ * i], chunkSize_);
-			
-			
+
 			initPopulationCUDA();
 
 			//Execute number of ES generations on chunk//
@@ -343,6 +331,17 @@ public:
 			printf("Audio chunk %d evaluated:\n", i);
 			printBest();
 		}
+		cudaBenchmarker_.pauseTimer("Total Audio Analysis Time");
+
+		cudaBenchmarker_.elapsedTimer(kernelNames_[1]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[2]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[3]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[4]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[5]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[6]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[7]);
+		cudaBenchmarker_.elapsedTimer(kernelNames_[8]);
+		cudaBenchmarker_.elapsedTimer("Total Audio Analysis Time");
 	}
 
 	//@ToDo - When using rotation index, need check this actually prints latest best//
@@ -352,7 +351,7 @@ public:
 		float* tempData = new float[4];
 		float* tempFitness = new float[2];
 		cudaMemcpy(tempData, devicePopulationValueBuffer_, population.numDimensions * sizeof(float), cudaMemcpyDeviceToHost);
-		cudaMemcpy(tempFitness, devicePopulationFitnessBuffer_, 2*sizeof(float), cudaMemcpyDeviceToHost);
+		cudaMemcpy(tempFitness, devicePopulationFitnessBuffer_, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\nFitness=%f\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3], tempFitness[0]);
 
 
@@ -368,6 +367,275 @@ public:
 	void readSynthesizerData(void* aOutputAudioBuffer, uint32_t aOutputAudioSize, void* aInputFFTDataBuffer, void* aInputFFTTargetBuffer, uint32_t aInputFFTSize)
 	{
 		cudaMemcpy(aOutputAudioBuffer, deviceGeneratedAudioBuffer_, aOutputAudioSize, cudaMemcpyDeviceToHost);
+	}
+
+	static void printAvailableDevices()
+	{
+		printf(
+			" CUDA Device Query (Runtime API) version (CUDART static linking)\n\n");
+
+		int deviceCount = 0;
+		cudaError_t error_id = cudaGetDeviceCount(&deviceCount);
+
+		if (error_id != cudaSuccess) {
+			printf("cudaGetDeviceCount returned %d\n-> %s\n",
+				static_cast<int>(error_id), cudaGetErrorString(error_id));
+			printf("Result = FAIL\n");
+			//exit(EXIT_FAILURE);
+		}
+
+		// This function call returns 0 if there are no CUDA capable devices.
+		if (deviceCount == 0) {
+			printf("There are no available device(s) that support CUDA\n");
+		}
+		else {
+			printf("Detected %d CUDA Capable device(s)\n", deviceCount);
+		}
+
+		int dev, driverVersion = 0, runtimeVersion = 0;
+
+		for (dev = 0; dev < deviceCount; ++dev) {
+			cudaSetDevice(dev);
+			cudaDeviceProp deviceProp;
+			cudaGetDeviceProperties(&deviceProp, dev);
+
+			printf("\nDevice %d: \"%s\"\n", dev, deviceProp.name);
+
+			// Console log
+			cudaDriverGetVersion(&driverVersion);
+			cudaRuntimeGetVersion(&runtimeVersion);
+			printf("  CUDA Driver Version / Runtime Version          %d.%d / %d.%d\n",
+				driverVersion / 1000, (driverVersion % 100) / 10,
+				runtimeVersion / 1000, (runtimeVersion % 100) / 10);
+			printf("  CUDA Capability Major/Minor version number:    %d.%d\n",
+				deviceProp.major, deviceProp.minor);
+
+			char msg[256];
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+			sprintf_s(msg, sizeof(msg),
+				"  Total amount of global memory:                 %.0f MBytes "
+				"(%llu bytes)\n",
+				static_cast<float>(deviceProp.totalGlobalMem / 1048576.0f),
+				(unsigned long long)deviceProp.totalGlobalMem);
+#else
+			snprintf(msg, sizeof(msg),
+				"  Total amount of global memory:                 %.0f MBytes "
+				"(%llu bytes)\n",
+				static_cast<float>(deviceProp.totalGlobalMem / 1048576.0f),
+				(unsigned long long)deviceProp.totalGlobalMem);
+#endif
+			printf("%s", msg);
+
+			printf("  (%2d) Multiprocessors, (%3d) CUDA Cores/MP:     %d CUDA Cores\n",
+				deviceProp.multiProcessorCount,
+				_ConvertSMVer2Cores(deviceProp.major, deviceProp.minor),
+				_ConvertSMVer2Cores(deviceProp.major, deviceProp.minor) *
+				deviceProp.multiProcessorCount);
+			printf(
+				"  GPU Max Clock rate:                            %.0f MHz (%0.2f "
+				"GHz)\n",
+				deviceProp.clockRate * 1e-3f, deviceProp.clockRate * 1e-6f);
+
+#if CUDART_VERSION >= 5000
+			// This is supported in CUDA 5.0 (runtime API device properties)
+			printf("  Memory Clock rate:                             %.0f Mhz\n",
+				deviceProp.memoryClockRate * 1e-3f);
+			printf("  Memory Bus Width:                              %d-bit\n",
+				deviceProp.memoryBusWidth);
+
+			if (deviceProp.l2CacheSize) {
+				printf("  L2 Cache Size:                                 %d bytes\n",
+					deviceProp.l2CacheSize);
+			}
+
+#else
+			// This only available in CUDA 4.0-4.2 (but these were only exposed in the
+			// CUDA Driver API)
+			int memoryClock;
+			getCudaAttribute<int>(&memoryClock, CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE,
+				dev);
+			printf("  Memory Clock rate:                             %.0f Mhz\n",
+				memoryClock * 1e-3f);
+			int memBusWidth;
+			getCudaAttribute<int>(&memBusWidth,
+				CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH, dev);
+			printf("  Memory Bus Width:                              %d-bit\n",
+				memBusWidth);
+			int L2CacheSize;
+			getCudaAttribute<int>(&L2CacheSize, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, dev);
+
+			if (L2CacheSize) {
+				printf("  L2 Cache Size:                                 %d bytes\n",
+					L2CacheSize);
+			}
+
+#endif
+
+			printf(
+				"  Maximum Texture Dimension Size (x,y,z)         1D=(%d), 2D=(%d, "
+				"%d), 3D=(%d, %d, %d)\n",
+				deviceProp.maxTexture1D, deviceProp.maxTexture2D[0],
+				deviceProp.maxTexture2D[1], deviceProp.maxTexture3D[0],
+				deviceProp.maxTexture3D[1], deviceProp.maxTexture3D[2]);
+			printf(
+				"  Maximum Layered 1D Texture Size, (num) layers  1D=(%d), %d layers\n",
+				deviceProp.maxTexture1DLayered[0], deviceProp.maxTexture1DLayered[1]);
+			printf(
+				"  Maximum Layered 2D Texture Size, (num) layers  2D=(%d, %d), %d "
+				"layers\n",
+				deviceProp.maxTexture2DLayered[0], deviceProp.maxTexture2DLayered[1],
+				deviceProp.maxTexture2DLayered[2]);
+
+			printf("  Total amount of constant memory:               %zu bytes\n",
+				deviceProp.totalConstMem);
+			printf("  Total amount of shared memory per block:       %zu bytes\n",
+				deviceProp.sharedMemPerBlock);
+			printf("  Total number of registers available per block: %d\n",
+				deviceProp.regsPerBlock);
+			printf("  Warp size:                                     %d\n",
+				deviceProp.warpSize);
+			printf("  Maximum number of threads per multiprocessor:  %d\n",
+				deviceProp.maxThreadsPerMultiProcessor);
+			printf("  Maximum number of threads per block:           %d\n",
+				deviceProp.maxThreadsPerBlock);
+			printf("  Max dimension size of a thread block (x,y,z): (%d, %d, %d)\n",
+				deviceProp.maxThreadsDim[0], deviceProp.maxThreadsDim[1],
+				deviceProp.maxThreadsDim[2]);
+			printf("  Max dimension size of a grid size    (x,y,z): (%d, %d, %d)\n",
+				deviceProp.maxGridSize[0], deviceProp.maxGridSize[1],
+				deviceProp.maxGridSize[2]);
+			printf("  Maximum memory pitch:                          %zu bytes\n",
+				deviceProp.memPitch);
+			printf("  Texture alignment:                             %zu bytes\n",
+				deviceProp.textureAlignment);
+			printf(
+				"  Concurrent copy and kernel execution:          %s with %d copy "
+				"engine(s)\n",
+				(deviceProp.deviceOverlap ? "Yes" : "No"), deviceProp.asyncEngineCount);
+			printf("  Run time limit on kernels:                     %s\n",
+				deviceProp.kernelExecTimeoutEnabled ? "Yes" : "No");
+			printf("  Integrated GPU sharing Host Memory:            %s\n",
+				deviceProp.integrated ? "Yes" : "No");
+			printf("  Support host page-locked memory mapping:       %s\n",
+				deviceProp.canMapHostMemory ? "Yes" : "No");
+			printf("  Alignment requirement for Surfaces:            %s\n",
+				deviceProp.surfaceAlignment ? "Yes" : "No");
+			printf("  Device has ECC support:                        %s\n",
+				deviceProp.ECCEnabled ? "Enabled" : "Disabled");
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+			printf("  CUDA Device Driver Mode (TCC or WDDM):         %s\n",
+				deviceProp.tccDriver ? "TCC (Tesla Compute Cluster Driver)"
+				: "WDDM (Windows Display Driver Model)");
+#endif
+			printf("  Device supports Unified Addressing (UVA):      %s\n",
+				deviceProp.unifiedAddressing ? "Yes" : "No");
+			printf("  Device supports Compute Preemption:            %s\n",
+				deviceProp.computePreemptionSupported ? "Yes" : "No");
+			printf("  Supports Cooperative Kernel Launch:            %s\n",
+				deviceProp.cooperativeLaunch ? "Yes" : "No");
+			printf("  Supports MultiDevice Co-op Kernel Launch:      %s\n",
+				deviceProp.cooperativeMultiDeviceLaunch ? "Yes" : "No");
+			printf("  Device PCI Domain ID / Bus ID / location ID:   %d / %d / %d\n",
+				deviceProp.pciDomainID, deviceProp.pciBusID, deviceProp.pciDeviceID);
+
+			const char *sComputeMode[] = {
+				"Default (multiple host threads can use ::cudaSetDevice() with device "
+				"simultaneously)",
+				"Exclusive (only one host thread in one process is able to use "
+				"::cudaSetDevice() with this device)",
+				"Prohibited (no host thread can use ::cudaSetDevice() with this "
+				"device)",
+				"Exclusive Process (many threads in one process is able to use "
+				"::cudaSetDevice() with this device)",
+				"Unknown",
+				NULL };
+			printf("  Compute Mode:\n");
+			printf("     < %s >\n", sComputeMode[deviceProp.computeMode]);
+		}
+
+		// If there are 2 or more GPUs, query to determine whether RDMA is supported
+		if (deviceCount >= 2) {
+			cudaDeviceProp prop[64];
+			int gpuid[64];  // we want to find the first two GPUs that can support P2P
+			int gpu_p2p_count = 0;
+
+			for (int i = 0; i < deviceCount; i++) {
+				//checkCudaErrors(cudaGetDeviceProperties(&prop[i], i));
+				cudaGetDeviceProperties(&prop[i], i);
+
+				// Only boards based on Fermi or later can support P2P
+				if ((prop[i].major >= 2)
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+					// on Windows (64-bit), the Tesla Compute Cluster driver for windows
+					// must be enabled to support this
+					&& prop[i].tccDriver
+#endif
+					) {
+					// This is an array of P2P capable GPUs
+					gpuid[gpu_p2p_count++] = i;
+				}
+			}
+
+			// Show all the combinations of support P2P GPUs
+			int can_access_peer;
+
+			if (gpu_p2p_count >= 2) {
+				for (int i = 0; i < gpu_p2p_count; i++) {
+					for (int j = 0; j < gpu_p2p_count; j++) {
+						if (gpuid[i] == gpuid[j]) {
+							continue;
+						}
+						//checkCudaErrors(
+						//	cudaDeviceCanAccessPeer(&can_access_peer, gpuid[i], gpuid[j]));
+						cudaDeviceCanAccessPeer(&can_access_peer, gpuid[i], gpuid[j]);
+						printf("> Peer access from %s (GPU%d) -> %s (GPU%d) : %s\n",
+							prop[gpuid[i]].name, gpuid[i], prop[gpuid[j]].name, gpuid[j],
+							can_access_peer ? "Yes" : "No");
+					}
+				}
+			}
+		}
+
+		// csv masterlog info
+		// *****************************
+		// exe and CUDA driver name
+		printf("\n");
+		std::string sProfileString = "deviceQuery, CUDA Driver = CUDART";
+		char cTemp[16];
+
+		// driver version
+		sProfileString += ", CUDA Driver Version = ";
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+		sprintf_s(cTemp, 10, "%d.%d", driverVersion / 1000, (driverVersion % 100) / 10);
+#else
+		snprintf(cTemp, sizeof(cTemp), "%d.%d", driverVersion / 1000,
+			(driverVersion % 100) / 10);
+#endif
+		sProfileString += cTemp;
+
+		// Runtime version
+		sProfileString += ", CUDA Runtime Version = ";
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+		sprintf_s(cTemp, 10, "%d.%d", runtimeVersion / 1000, (runtimeVersion % 100) / 10);
+#else
+		snprintf(cTemp, sizeof(cTemp), "%d.%d", runtimeVersion / 1000,
+			(runtimeVersion % 100) / 10);
+#endif
+		sProfileString += cTemp;
+
+		// Device count
+		sProfileString += ", NumDevs = ";
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+		sprintf_s(cTemp, 10, "%d", deviceCount);
+#else
+		snprintf(cTemp, sizeof(cTemp), "%d", deviceCount);
+#endif
+		sProfileString += cTemp;
+		sProfileString += "\n";
+		printf("%s", sProfileString.c_str());
+
+		printf("Result = PASS\n");
+
 	}
 };
 

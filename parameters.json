@@ -11,12 +11,12 @@
     "audio": {
         "sampleRate": 44100,
         "audioLengthLog2": 10,
-        "wavetableSize": 32768
+        "wavetableSize": 327680
     },
 
     "evolutionary": {
-        "numParents": 192,
-        "numOffspring": 1344,
+        "numParents": 1024,
+        "numOffspring": 7168,
         "numDimensions": 4,
         "paramMins": [0.0, 0.0, 0.0, 0.0],
         "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
@@ -27,10 +27,13 @@
     "type": {
         "implementation": "OpenCL",
         "OpenCL": {
-            "workgroupSize": 16
+            "workgroupSize": 32
         },
         "Vulkan": {
-			"workgroupSize": 8
+			"workgroupSize": 32
+        },
+        "CUDA": {
+			"workgroupSize": 32
         },
         "input": "params",
         "params": [1450.0, 3.0, 200.0, 1.0],

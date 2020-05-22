@@ -246,6 +246,7 @@ public:
 		fftOneOverSize = 1.0f / fftSize;
 		fftWindow = new double [fftSize];
 		fftWindowedAudio = new double [fftSize];
+		fftOutSize = (audioLength / 2 + 4) * 2;
 
 		initFFTW(aPopulationSize);
 
@@ -380,6 +381,27 @@ public:
 			}
 		}
 	}
+	void calculateFFTWindow(float* input, float* output)
+	{
+		//apply window
+		for (uint32_t i = 0; i < fftSize; i++) {
+			fftWindowedAudio[i] = input[i] * fftWindow[i];
+		}
+	}
+	void calculateJustFFT(float* input, float* output)
+	{
+		// execute FFTW plan
+		fftw_execute_dft_r2c(fftPlan, fftWindowedAudio, fftOut);
+
+		//@ToDo - Investigate why this part would be needed. It is done in fitness evaluation? No I think it is because this is fft calculated for target once. But new audio must be done each time.
+		for (uint32_t i = 0; i < fftHalfSize; i++)
+		{
+
+			const float rawMagnitude = hypotf((float)fftOut[i][0], (float)fftOut[i][1]);
+			const float magnitudeForFFTSize = rawMagnitude * fftOneOverSize;
+			output[i] = magnitudeForFFTSize * fftOneOverWindowFactor;
+		}
+	}
 	void calculateFFT(float* input, float* output)
 	{
 		//apply window
@@ -476,7 +498,7 @@ public:
 	{}
 	Evolutionary_Strategy(const uint32_t aNumGenerations, const uint32_t aNumParents, const uint32_t aNumOffspring, const uint32_t aNumDimensions, const std::vector<float> aParamMin, const std::vector<float> aParamMax, uint32_t aAudioLengthLog2) :
 		population({aNumParents, aNumOffspring, aNumDimensions, aNumParents + aNumOffspring, (aNumParents + aNumOffspring) * sizeof(float), new float[(aNumDimensions+1) * aNumParents + aNumOffspring]}),
-		objective(population.populationLength, population.numDimensions, aParamMin, aParamMax, aAudioLengthLog2),
+		objective(aNumParents + aNumOffspring, aNumDimensions, aParamMin, aParamMax, aAudioLengthLog2),
 		numGenerations(aNumGenerations),
 		mPI(3.14159265358979323846),
 		alpha(1.4f),
@@ -503,10 +525,6 @@ public:
 
 	}
 	virtual void readPopulationData(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
-	{
-
-	}
-	virtual void readPopulationDataStaging(void* aInputPopulationValueData, void* aOutputPopulationValueData, uint32_t aPopulationValueSize, void* aInputPopulationStepData, void* aOutputPopulationStepData, uint32_t aPopulationStepSize, void* aInputPopulationFitnessData, void* aOutputPopulationFitnessData, uint32_t aPopulationFitnessSize)
 	{
 
 	}
