@@ -227,7 +227,7 @@ int main(int argc, char* argv[])
 		std::cout << "Total time to complete: " << std::chrono::duration<double>(diff).count() << "s" << std::endl;
 		std::cout << "Total time to complete: " << std::chrono::duration <double, std::milli>(diff).count() << "ms" << std::endl << std::endl;
 
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
@@ -252,7 +252,7 @@ int main(int argc, char* argv[])
 		//obj.synthesiseAudio(bestParamsUnscaled, audioBuffer);
 		//outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
 
-		//printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
+		printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
 		//es->printBest();
 	}
 	catch (const std::exception& e) {
@@ -262,6 +262,19 @@ int main(int argc, char* argv[])
 		system("pause");
 		return EXIT_FAILURE;
 	}
+
+
+	//Benchmark 1: OverallExecution
+
+	//Benchmark 2: ProgramStageExecution
+
+	//Benchmark 3: AudioAnalysisChunkSize
+
+	//Benchmark 4: Populationscaling
+
+	//Benchmark 5: Optimizations On/Off
+
+	//Benchmark 6: Discrete vs Integrate
 
 	system("pause");
 	return EXIT_SUCCESS;
