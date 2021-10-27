@@ -20,6 +20,11 @@ public:
 			csvFile << aFields[i] << ",";
 		csvFile << "\n";
 	}
+	bool close()
+	{
+		csvFile.close();
+		return true;
+	}
 	bool addRecord(std::vector<std::string> aRecord)
 	{
 		if (aRecord.size() != recordLength_)

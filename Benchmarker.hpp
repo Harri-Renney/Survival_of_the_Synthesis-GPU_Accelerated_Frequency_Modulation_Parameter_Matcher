@@ -160,6 +160,11 @@ public:
 		cntTimersAverage[aTimer] = 0;
 		totalTimers[aTimer] = 0.0;
 	}
+	bool close()
+	{
+		logger_.close();
+		return true;
+	}
 };
 
 #endif
