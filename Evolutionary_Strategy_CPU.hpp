@@ -70,6 +70,10 @@ private:
 
 	Benchmarker cpuBenchmarker_;
 
+	std::default_random_engine generatorValue;
+	std::default_random_engine generatorStep;
+	std::uniform_real_distribution<float> distributionStep;
+
 	void initRandomStates()
 	{
 		//Initialize random numbers in CPU buffer//
@@ -132,14 +136,23 @@ private:
 			}
 		}
 	}
+
+	float gauss_rand()
+	{
+		std::uniform_real_distribution<float> tempValue(-0.01, 0.01);
+		float sum = 0.0f;
+		int tmp_rand;
+		for (int i = 0; i < 12; i++)
+		{
+			sum += tempValue(generatorValue);
+		}
+		sum /= 12.0f;
+		return sum;
+	}
 	void mutate()
 	{
-		unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-		std::default_random_engine generatorValue(seed);
-		std::default_random_engine generatorStep(seed);
-		std::uniform_real_distribution<float> distributionStep(-0.01, 0.01);
-
 		uint32_t randomParentIdx;
+		std::uniform_real_distribution<float> tempValue(-0.0001, 0.0001);
 		for (uint32_t i = 0; i != population.populationSize; ++i)
 		{
 			for (uint32_t j = 0; j != population.numDimensions; ++j)
@@ -147,12 +160,17 @@ private:
 				float step = *population.getStep(i, j);
 				std::uniform_real_distribution<float> distributionValue(-abs(step), abs(step));
 				
-				float newVal = *population.getValue(i, j) + distributionValue(generatorValue);
-				while (newVal > 1.0 || newVal < 0.0)
-					newVal = -newVal / 2.0;
+				float newVal = *population.getValue(i, j) + gauss_rand();
+				//while (newVal > 1.0 || newVal < 0.0)
+				//	newVal = -newVal / 2.0;
+				if (newVal >= 1.0)
+					newVal = 1.0;
+				if (newVal < 0.0)
+					newVal = 0.0;
+
 				
 				*population.getValue(i, j) = newVal;
-				*population.getStep(i, j) = step + distributionStep(generatorStep);
+				*population.getStep(i, j) = 0.5;
 
 				//std::uniform_real_distribution<float> distributionValue(-abs(1.0), abs(1.0));
 				//float newVal = distributionValue(generatorValue);
@@ -160,7 +178,7 @@ private:
 				//	newVal = -newVal / 2.0;
 				//*population.getValue(i, j) = newVal;
 			}
-			//if (i == 200)
+			//if (i == 400)
 			//{
 			//	*population.getValue(i, 0) = 0.41193181818;
 			//	*population.getValue(i, 1) = 0.375;
@@ -178,9 +196,19 @@ private:
 	{
 		for (uint32_t i = 0; i != population.populationSize; ++i)
 		{
-			const std::vector<float> currentParams = { *population.getValue(i, 0), *population.getValue(i, 1), *population.getValue(i, 2), *population.getValue(i, 3) };
+			//const std::vector<float> currentParams = { *population.getValue(i, 0), *population.getValue(i, 1), *population.getValue(i, 2), *population.getValue(i, 3) };
 			//const std::vector<float> currentParams = { 0.000689655172, 0.33333, 0.005, 1.0 };
-			objective.synthesiseAudio(currentParams, &audioData_[i * objective.audioLength]);
+			//objective.synthesiseAudio(currentParams, &audioData_[i * objective.audioLength]);
+
+			//const std::vector<float> currentParams = { *population.getValue(i, 0), *population.getValue(i, 1), *population.getValue(i, 2), *population.getValue(i, 3), 
+			//	*population.getValue(i, 4), *population.getValue(i, 5), *population.getValue(i, 6), *population.getValue(i, 7),
+			//	*population.getValue(i, 8), *population.getValue(i, 9), *population.getValue(i, 10),*population.getValue(i, 11) };
+			////const std::vector<float> currentParams = { 0.000689655172, 0.33333, 0.005, 1.0 };
+			//objective.synthesiseAudioTriple(currentParams, &audioData_[i * objective.audioLength]);
+
+			const std::vector<float> currentParams = { *population.getValue(i, 0), *population.getValue(i, 1), *population.getValue(i, 2), *population.getValue(i, 3),
+				*population.getValue(i, 4), *population.getValue(i, 5) };
+			objective.synthesiseAudioDoubleSeries(currentParams, &audioData_[i * objective.audioLength]);
 		}
 	}
 	void applyFFTWindow()
@@ -204,7 +232,7 @@ private:
 		for (uint32_t i = 0; i != population.populationLength; ++i)
 		{
 			float fft_magnitude_sum = 0.0;
-			for (uint32_t j = 0; j < objective.fftHalfSize; j+=2)
+			for (uint32_t j = 0; j < objective.fftHalfSize; j++)
 			{
 					//GPU paper//
 					//const float raw_magnitude = hypot(fftAudioData_[(i * objective.fftHalfSize) + (j / 2)],
@@ -214,11 +242,11 @@ private:
 					//	targetFFT_[j/2];
 					//error += errorTemp * errorTemp;
 
-				const float raw_magnitude = std::hypot(fftAudioData_[i * objective.fftOutSize + j],
-					fftAudioData_[i * objective.fftOutSize + j + 1]);
-				const float magnitude_for_fft_size = raw_magnitude * objective.fftOneOverSize;
-				errorTemp = (magnitude_for_fft_size * objective.fftOneOverWindowFactor) -
-					targetFFT_[j / 2];
+				//const float raw_magnitude = std::hypot(fftAudioData_[i * objective.fftOutSize + j],
+				//	fftAudioData_[i * objective.fftOutSize + j + 1]);
+				//const float magnitude_for_fft_size = raw_magnitude * objective.fftOneOverSize;
+				errorTemp = fftAudioData_[i * objective.fftHalfSize + (j)] -
+					targetFFT_[j];
 				error += errorTemp * errorTemp;
 
 				//float temp = fftAudioData_[(i * objective.fftHalfSize) + (j)] - targetFFT_[j];
@@ -252,7 +280,8 @@ private:
 	}
 	void sort()
 	{
-		population.quickSortPopulation(0, population.populationSize-1);
+		//population.quickSortPopulation(0, population.populationSize);
+		population.bubbleSortPopulation();
 	}
 	void rotate()
 	{
@@ -277,6 +306,11 @@ public:
 		audioData_.resize(population.populationSize * objective.audioLength);
 		fftAudioData_.resize(population.populationSize * objective.fftHalfSize);
 		targetFFT_.resize(objective.fftHalfSize);
+
+		unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+		std::default_random_engine generatorValue(seed);
+		std::default_random_engine generatorStep(seed);
+		std::uniform_real_distribution<float> distributionStep(-0.01, 0.01);
 	}
 	void init()
 	{
@@ -353,7 +387,7 @@ public:
 		//start = std::chrono::steady_clock::now();
 
 		cpuBenchmarker_.startTimer(kernelNames_[4]);
-		applyFFTWindow();
+		//applyFFTWindow();
 		cpuBenchmarker_.pauseTimer(kernelNames_[4]);
 
 		cpuBenchmarker_.startTimer(kernelNames_[5]);
@@ -430,6 +464,8 @@ public:
 		cpuBenchmarker_.elapsedTimer(kernelNames_[7]);
 		cpuBenchmarker_.elapsedTimer(kernelNames_[8]);
 		cpuBenchmarker_.elapsedTimer("Total Audio Analysis Time");
+
+		cpuBenchmarker_.close();
 	}
 
 	//Audio files//
@@ -460,6 +496,13 @@ public:
 		tempData[3] = *population.getValue(0, 3);
 		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3]);
 		printf("Fitness: %f\n", *population.getFitness(0));
+
+		tempData[0] = *population.getValue(1, 0);
+		tempData[1] = *population.getValue(1, 1);
+		tempData[2] = *population.getValue(1, 2);
+		tempData[3] = *population.getValue(1, 3);
+		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3]);
+		printf("Fitness: %f\n", *population.getFitness(1));
 	}
 };
 

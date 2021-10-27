@@ -105,6 +105,24 @@ struct Population
 	//	}
 	//}
 
+	void bubbleSortPopulation()
+	{
+		bool isSwap = true;
+		while (isSwap)
+		{
+			isSwap = false;
+			for (uint32_t i = 0; i != populationLength-1; ++i)
+			{
+				if (*getFitness(i) > *getFitness(i + 1))
+				{
+					swap(i, i+1);
+					isSwap = true;
+				}
+			}
+
+		}
+	}
+
 	void quickSortPopulation(int left, int right) {
 
 		int i = left, j = right;
@@ -159,6 +177,7 @@ class Objective
 private:
 	float wavetablePosOne = 0.0f;
 	float wavetablePosTwo = 0.0f;
+	float wavetablePosThree = 0.0;
 public:
 	//Parameters for the synthesiser//
 	const std::vector<float> paramMins;
@@ -267,8 +286,8 @@ public:
 		fftPlan = fftw_plan_dft_r2c_1d(audioLength, tmpWindowedAudio, tmpFFTOut, FFTW_PATIENT);
 
 		//These variables will never be used, but are needed for initialisation
-		fftw_free(tmpFFTOut);
-		free(tmpWindowedAudio);
+		//fftw_free(tmpFFTOut);
+		//free(tmpWindowedAudio);
 		
 		//Initalise fft -@ToDo Sort this out...//
 		fftSizeLog2 = audioLengthLog2;
@@ -381,6 +400,99 @@ public:
 			}
 		}
 	}
+	void synthesiseAudioDoubleSeries(const std::vector<float> aParams, float* aAudioBuffer)
+	{
+		//float params[4] = { aParams[0], aParams[1], aParams[2], aParams[3] };
+		float params[6] = { aParams[0] * paramMaxs[0], aParams[1] * paramMaxs[1], aParams[2] * paramMaxs[2], aParams[3] * paramMaxs[3], aParams[4] * paramMaxs[4], aParams[5] * paramMaxs[5] };
+		float modIdxMulModFreqOne = params[0] * params[1];
+		float modIdxMulModFreqTwo = params[2] * params[3];
+		float modIdxMulModFreqThree = params[4] * params[5];
+
+		const float wavetableIncrementOne = w2srRatio * params[1];
+
+		float currentSampleOne;
+		float currentSampleTwo;
+
+		// Perform fm synthesis one sample at a time
+		for (int i = 0; i < audioLength; i++)
+		{
+			////Oscillation 1//
+			currentSampleOne = wavetable[(unsigned int)wavetablePosOne] * modIdxMulModFreqOne + params[3];
+			wavetablePosOne += wavetableIncrementOne;
+			if (wavetablePosOne >= wavetableSize) {
+				wavetablePosOne -= wavetableSize;
+			}
+
+			// Oscillation 2 - modulated
+			currentSampleTwo = wavetable[(unsigned int)wavetablePosTwo] * modIdxMulModFreqTwo + params[5];
+			wavetablePosTwo += w2srRatio * currentSampleOne;
+			if (wavetablePosTwo >= wavetableSize) {
+				wavetablePosTwo -= wavetableSize;
+			}
+
+			if (wavetablePosTwo < 0.0f) {
+				wavetablePosTwo += wavetableSize;
+			}
+
+			aAudioBuffer[i] = wavetable[(unsigned int)wavetablePosThree] * modIdxMulModFreqThree;
+			wavetablePosThree += w2srRatio * currentSampleTwo;
+			if (wavetablePosThree >= wavetableSize) {
+				wavetablePosThree -= wavetableSize;
+			}
+
+			if (wavetablePosThree < 0.0f) {
+				wavetablePosThree += wavetableSize;
+			}
+			//float temp = i / 44100.0;
+			//aAudioBuffer[i] = params[0] * sin(params[1] * temp + params[2] * sin(params[3] * temp + params[4] * sin(params[5] * temp)));
+		}
+	}
+	void synthesiseAudioTriple(const std::vector<float> aParams, float* aAudioBuffer)
+	{
+		//float params[4] = { aParams[0], aParams[1], aParams[2], aParams[3] };
+		float params[12] = { aParams[0] * paramMaxs[0], aParams[1] * paramMaxs[1], aParams[2] * paramMaxs[2], aParams[3] * paramMaxs[3],
+		aParams[4] * paramMaxs[0], aParams[5] * paramMaxs[1], aParams[6] * paramMaxs[2], aParams[7] * paramMaxs[3] ,
+		aParams[8] * paramMaxs[0], aParams[9] * paramMaxs[1], aParams[10] * paramMaxs[2], aParams[11] * paramMaxs[3] };
+
+		float modIdxMulModFreq[3] = { params[0] * params[1], params[4] * params[5], params[8] * params[9] };
+		float carrierFreq[3] = { params[2], params[6], params[10] };
+		float carrierAmp[3] = { params[3], params[7], params[11] };
+
+		const float wavetableIncrement[3] = { w2srRatio * params[0], w2srRatio * params[4], w2srRatio * params[8] };
+
+		float total_sample[3];
+		float currentSample[3];
+
+		float wavetablePosTripleOne[3] = { 0.0f,0.0f,0.0f };
+		float wavetablePosTripleTwo[3] = { 0.0f,0.0f,0.0f };
+
+		// Perform fm synthesis one sample at a time
+		for (int i = 0; i < audioLength; i++)
+		{
+			for (int j = 0; j < 3; ++j)
+			{
+				//Oscillation 1//
+				currentSample[j] = wavetable[(unsigned int)(wavetablePosTripleOne[j])] * modIdxMulModFreq[j] +
+					carrierFreq[j];
+				wavetablePosTripleOne[j] += wavetableIncrement[j];
+				if (wavetablePosTripleOne[j] >= wavetableSize) {
+					wavetablePosTripleOne[j] -= wavetableSize;
+				}
+
+				// Oscillation 2 - modulated
+				total_sample[j] = wavetable[(unsigned int)(wavetablePosTripleTwo[j])] * carrierAmp[j];
+				wavetablePosTripleTwo[j] += w2srRatio * currentSample[j];
+				if (wavetablePosTripleTwo[j] >= wavetableSize) {
+					wavetablePosTripleTwo[j] -= wavetableSize;
+				}
+
+				if (wavetablePosTripleTwo[j] < 0.0f) {
+					wavetablePosTripleTwo[j] += wavetableSize;
+				}
+			}
+			aAudioBuffer[i] = (total_sample[0] + total_sample[1] + total_sample[2]) / 3.0;
+		}
+	}
 	void calculateFFTWindow(float* input, float* output)
 	{
 		//apply window
@@ -390,6 +502,11 @@ public:
 	}
 	void calculateJustFFT(float* input, float* output)
 	{
+		//apply window
+		for (uint32_t i = 0; i < fftSize; i++) {
+			fftWindowedAudio[i] = input[i] * fftWindow[i];
+		}
+
 		// execute FFTW plan
 		fftw_execute_dft_r2c(fftPlan, fftWindowedAudio, fftOut);
 
@@ -400,6 +517,8 @@ public:
 			const float rawMagnitude = hypotf((float)fftOut[i][0], (float)fftOut[i][1]);
 			const float magnitudeForFFTSize = rawMagnitude * fftOneOverSize;
 			output[i] = magnitudeForFFTSize * fftOneOverWindowFactor;
+
+			//output[i] = 
 		}
 	}
 	void calculateFFT(float* input, float* output)

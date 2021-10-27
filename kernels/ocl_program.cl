@@ -248,6 +248,16 @@ __kernel void mutatePopulation(__global float* in_population_values,
     //in_population_values[1] = 0.375;
     //in_population_values[2] = 0.0568181818;
     //in_population_values[3] = 1.0;
+	//
+	//in_population_values[4] = 0.69602272727;
+    //in_population_values[5] = 0.375;
+    //in_population_values[6] = 0.0568181818;
+    //in_population_values[7] = 1.0;
+	//
+	//in_population_values[8] = 0.98011363636;
+    //in_population_values[9] = 0.375;
+    //in_population_values[10] = 0.0568181818;
+    //in_population_values[11] = 1.0;
 }
 
 
@@ -316,6 +326,119 @@ __kernel void synthesisePopulation(__global float* out_audio_waves,
 			wave_table_pos_2 -= WAVETABLE_SIZE;
 		if (wave_table_pos_2 < 0.0f)
 			wave_table_pos_2 += WAVETABLE_SIZE;
+	}
+}
+
+__kernel void synthesisePopulationDoubleSeries(__global float* out_audio_waves,
+                          __global float* in_population_values,
+                          __constant float* param_mins, __constant float* param_maxs,
+                                     __global uint* rotationIndex, __global float* wavetable)
+{
+    int index = get_global_id(0);
+    int group_index = get_group_id(0);
+
+    uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
+
+    float params_scaled[6];
+
+    /* Scale the synthesis parameters */
+    for(int i = 0; i < NUM_DIMENSIONS; i++)
+    {
+        params_scaled[i] = param_mins[i] + in_population_values[populationStartIndex+index*NUM_DIMENSIONS+i] * (param_maxs[i]-param_mins[i]);
+    }
+
+    float modIdxMulModFreqOne = params_scaled[0] * params_scaled[1];
+    float modIdxMulModFreqTwo = params_scaled[2] * params_scaled[3];
+    float modIdxMulModFreqThree = params_scaled[4] * params_scaled[5];
+
+    /* Use the wavetable positions to track where we are at each frame of synthesis. */
+    float wave_table_pos_1 = 0.0f;
+    float wave_table_pos_2 = 0.0f;
+    float wave_table_pos_3 = 0.0f;
+
+    float cur_sample_one;
+    float cur_sample_two;
+
+    const float wavetableIncrementOne = (WAVETABLE_SIZE / 44100.0) * params_scaled[1];
+
+    for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
+	{
+		cur_sample_one = wavetable[(uint)wave_table_pos_1] * modIdxMulModFreqOne + params_scaled[3];										 
+		wave_table_pos_1 += wavetableIncrementOne;
+        cur_sample_two = wavetable[(uint)wave_table_pos_2] * modIdxMulModFreqTwo + params_scaled[4];
+		wave_table_pos_2 += (WAVETABLE_SIZE / 44100.0) * cur_sample_one;
+        out_audio_waves[index * AUDIO_WAVE_FORM_SIZE + i] = wavetable[(uint)wave_table_pos_3] * modIdxMulModFreqThree;
+		wave_table_pos_3 += (WAVETABLE_SIZE / 44100.0) * cur_sample_two;
+		
+		if (wave_table_pos_1 >= WAVETABLE_SIZE)
+			wave_table_pos_1 -= WAVETABLE_SIZE;
+		if (wave_table_pos_1 < 0.0f)
+			wave_table_pos_1 += WAVETABLE_SIZE;
+		if (wave_table_pos_2 >= WAVETABLE_SIZE)
+			wave_table_pos_2 -= WAVETABLE_SIZE;
+		if (wave_table_pos_2 < 0.0f)
+			wave_table_pos_2 += WAVETABLE_SIZE;
+        if (wave_table_pos_3 >= WAVETABLE_SIZE)
+			wave_table_pos_3 -= WAVETABLE_SIZE;
+		if (wave_table_pos_3 < 0.0f)
+			wave_table_pos_3 += WAVETABLE_SIZE;
+	}
+}
+
+__kernel void synthesisePopulationTripleParallel(__global float* out_audio_waves,
+                          __global float* in_population_values,
+                          __constant float* param_mins, __constant float* param_maxs,
+                                     __global uint* rotationIndex, __global float* wavetable)
+{
+    int index = get_global_id(0);
+    int local_index = get_local_id(0);
+    int group_index = get_group_id(0);
+
+    uint populationStartIndex = rotationIndex[0] * POPULATION_SIZE;
+
+    const int pop_index = local_index * NUM_DIMENSIONS;
+    float params_scaled[12];
+
+    /* Scale the synthesis parameters */
+    for(int i = 0; i < NUM_DIMENSIONS; i++)
+    {
+        params_scaled[i] = param_mins[i] + in_population_values[populationStartIndex+index*NUM_DIMENSIONS+i] * (param_maxs[i]-param_mins[i]);
+    }
+
+    float modIdxMulModFreq[3] = {params_scaled[0] * params_scaled[1], params_scaled[4] * params_scaled[5], params_scaled[8] * params_scaled[9]};
+    float carrierFreq[3]  = {params_scaled[2], params_scaled[6], params_scaled[10]};
+    float carrierAmp[3] = {params_scaled[3], params_scaled[7], params_scaled[11]};
+
+    /* Use the wavetable positions to track where we are at each frame of synthesis. */
+    float wave_table_pos_1[3] = {0.0, 0.0, 0.0};  
+    float wave_table_pos_2[3] = {0.0, 0.0, 0.0};
+
+	float total_sample[3];
+    float cur_sample[3];
+
+    const float wavetableIncrement[3] = {(WAVETABLE_SIZE / 44100.0) * params_scaled[0], (WAVETABLE_SIZE / 44100.0) * params_scaled[4], (WAVETABLE_SIZE / 44100.0) * params_scaled[8]};
+
+    for(int i = 0; i < AUDIO_WAVE_FORM_SIZE; i++)
+	{
+		for(int j = 0; j < 3; ++j)
+		{
+			cur_sample[j] = wavetable[(uint)(wave_table_pos_1[j])] * modIdxMulModFreq[j] + carrierFreq[j];
+			total_sample[j] = wavetable[(uint)(wave_table_pos_2[j])] * carrierAmp[j];
+															 
+			wave_table_pos_1[j] += wavetableIncrement[j];
+			wave_table_pos_2[j] += (WAVETABLE_SIZE / 44100.0) * cur_sample[j];
+		
+			if (wave_table_pos_1[j] >= WAVETABLE_SIZE)
+				wave_table_pos_1[j] -= WAVETABLE_SIZE;
+			//if (wave_table_pos_1[j] < 0.0f)
+			//	wave_table_pos_1[j] += WAVETABLE_SIZE;
+			if (wave_table_pos_2[j] >= WAVETABLE_SIZE)
+				wave_table_pos_2[j] -= WAVETABLE_SIZE;
+			if (wave_table_pos_2[j] < 0.0f)
+				wave_table_pos_2[j] += WAVETABLE_SIZE;
+		}
+		out_audio_waves[index * AUDIO_WAVE_FORM_SIZE + i] = (total_sample[0] + total_sample[1] + total_sample[2]) / 3.0;
+
 	}
 }
 

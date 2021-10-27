@@ -9,7 +9,7 @@
 #include "Evolutionary_Strategy_CPU.hpp"
 #include "Evolutionary_Strategy_Vulkan.hpp"
 #include "Evolutionary_Strategy_OpenCL.hpp"
-#include "Evolutionary_Strategy_CUDA.hpp"
+//#include "Evolutionary_Strategy_CUDA.hpp"
 
 #include "sndfile.h"    //Audio file I/O
 
@@ -96,7 +96,8 @@ int main(int argc, char* argv[])
 		const uint32_t numOffspring = j["evolutionary"]["numOffspring"];
 		const uint32_t numDimensions = j["evolutionary"]["numDimensions"];
 		//const std::vector<float> paramMins;
-		const std::vector<float> paramInputs = std::vector<float>{ {j["type"]["params"][0], j["type"]["params"][1], j["type"]["params"][2], j["type"]["params"][3]} };
+		//const std::vector<float> paramInputs = std::vector<float>{ {j["type"]["params"][0], j["type"]["params"][1], j["type"]["params"][2], j["type"]["params"][3]} };
+		const std::vector<float> paramInputs = j["type"]["params"];
 		const std::vector<float> paramMins = j["evolutionary"]["paramMins"];
 		const std::vector<float> paramMaxs = j["evolutionary"]["paramMaxs"];
 		const uint32_t fitnessThreshold = j["evolutionary"]["fitnessThreshold"];
@@ -160,24 +161,24 @@ int main(int argc, char* argv[])
 
 			es = new Evolutionary_Strategy_Vulkan(args);
 		}
-		if (implementation == Implementation::CUDA)
-		{
-			Evolutionary_Strategy_CUDA_Arguments args;
-			args.es_args.pop.numParents = numParents;
-			args.es_args.pop.numOffspring = numOffspring;
-			args.es_args.pop.numDimensions = numDimensions;
-			args.es_args.pop.populationLength = numParents + numOffspring;
-			args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
-			args.es_args.numGenerations = numGenerations;
-			args.es_args.paramMin = paramMins;
-			args.es_args.paramMax = paramMaxs;
-			args.es_args.audioLengthLog2 = audioLengthLog2;
-			args.localWorkspace = dim3(j["type"]["CUDA"]["workgroupSize"], 1, 1);
+		//if (implementation == Implementation::CUDA)
+		//{
+		//	Evolutionary_Strategy_CUDA_Arguments args;
+		//	args.es_args.pop.numParents = numParents;
+		//	args.es_args.pop.numOffspring = numOffspring;
+		//	args.es_args.pop.numDimensions = numDimensions;
+		//	args.es_args.pop.populationLength = numParents + numOffspring;
+		//	args.es_args.pop.populationSize = numParents + numOffspring * sizeof(float);
+		//	args.es_args.numGenerations = numGenerations;
+		//	args.es_args.paramMin = paramMins;
+		//	args.es_args.paramMax = paramMaxs;
+		//	args.es_args.audioLengthLog2 = audioLengthLog2;
+		//	args.localWorkspace = dim3(j["type"]["CUDA"]["workgroupSize"], 1, 1);
 
-			es = new Evolutionary_Strategy_CUDA(args);
+		//	es = new Evolutionary_Strategy_CUDA(args);
 
-			Evolutionary_Strategy_CUDA::printAvailableDevices();
-		}
+		//	Evolutionary_Strategy_CUDA::printAvailableDevices();
+		//}
 
 		uint32_t populationValueSize = (numParents + numOffspring) * numDimensions;
 		uint32_t populationStepSize = (numParents + numOffspring ) * numDimensions;
@@ -210,8 +211,18 @@ int main(int argc, char* argv[])
 		obj.initWavetable();
 		if (inputType == InputType::Params)
 		{
-			const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3] };
-			obj.synthesiseAudio(params, targetAudio);
+			//Simple
+			//const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3] };
+			//obj.synthesiseAudio(params, targetAudio);
+			//Triple parallel
+			/*const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3],
+			paramInputs[4] / paramMaxs[0], paramInputs[5] / paramMaxs[1], paramInputs[6] / paramMaxs[2], paramInputs[7] / paramMaxs[3] ,
+			paramInputs[8] / paramMaxs[0], paramInputs[9] / paramMaxs[1], paramInputs[10] / paramMaxs[2], paramInputs[11] / paramMaxs[3] };
+			obj.synthesiseAudioTriple(params, targetAudio);*/
+			//Double Series
+			const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3],
+			paramInputs[4] / paramMaxs[4], paramInputs[5] / paramMaxs[5] };
+			obj.synthesiseAudioDoubleSeries(params, targetAudio);
 			outputAudioFile("inputGenerated.wav", targetAudio, (targetAudioLength));
 		}
 
@@ -227,7 +238,7 @@ int main(int argc, char* argv[])
 		std::cout << "Total time to complete: " << std::chrono::duration<double>(diff).count() << "s" << std::endl;
 		std::cout << "Total time to complete: " << std::chrono::duration <double, std::milli>(diff).count() << "ms" << std::endl << std::endl;
 
-		//es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
+		es->readPopulationData(inputPopulationValues, outputPopulationValues, populationValueSize * sizeof(float), inputPopulationSteps, outputPopulationSteps, populationStepSize * sizeof(float), inputPopulationFitness, outputPopulationFitness, populationFitnessSize * sizeof(float));
 		//es->readSynthesizerData(outputAudioData, audioLength * sizeof(float)*20, fftAudioData, fftTargetData, fftLength * sizeof(float));
 		//((Evolutionary_Strategy_Vulkan*)es)->readTestingData(testingValues, populationValueSize);
 		for (int i = 0; i != es->population.populationLength; ++i)
@@ -245,15 +256,28 @@ int main(int argc, char* argv[])
 		//std::cout << inputPopulationValues[es->population.populationLength * 4 * 1] << std::endl;
 		//outputAudioFile("gpuOutput.wav", outputAudioData, audioLength*20);	//@ToDo - Why not working?
 		
+		//Simple
 		//float params[] = { 500.0f / paramMax[0], 8.0f / paramMax[1], 2500.0f / paramMax[2], 1.0f / paramMax[3] };
-		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
+		//std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
+		//Triple Parallel
+		//std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3],
+		//inputPopulationValues[4], inputPopulationValues[5], inputPopulationValues[6], inputPopulationValues[7] ,
+		//inputPopulationValues[8], inputPopulationValues[9], inputPopulationValues[10], inputPopulationValues[11] };
+		//std::vector<float> bestParamsScaled = es->objective.scaleParams(bestParamsUnscaled);
+		//float* audioBuffer = new float[1 << 14];	//Why need this much memory?
+		//obj.synthesiseAudioTriple(bestParamsUnscaled, audioBuffer);
+		//Double Series
+		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3],
+		inputPopulationValues[4], inputPopulationValues[5] };
 		std::vector<float> bestParamsScaled = es->objective.scaleParams(bestParamsUnscaled);
 		float* audioBuffer = new float[1 << 14];	//Why need this much memory?
-		//obj.synthesiseAudio(bestParamsUnscaled, audioBuffer);
-		//outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
+		obj.synthesiseAudioDoubleSeries(bestParamsUnscaled, audioBuffer);
+		outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
 
-		//printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
-		//es->printBest();
+		printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);
+		//for(uint32_t i = 0; i != 1000; ++i)
+		//	printf("Fitness %d = %f\n", i, inputPopulationFitness[i]);
+		es->printBest();
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << std::endl;
@@ -262,6 +286,19 @@ int main(int argc, char* argv[])
 		system("pause");
 		return EXIT_FAILURE;
 	}
+
+
+	//Benchmark 1: OverallExecution
+
+	//Benchmark 2: ProgramStageExecution
+
+	//Benchmark 3: AudioAnalysisChunkSize
+
+	//Benchmark 4: Populationscaling
+
+	//Benchmark 5: Optimizations On/Off
+
+	//Benchmark 6: Discrete vs Integrate
 
 	system("pause");
 	return EXIT_SUCCESS;

@@ -5,27 +5,27 @@
         "isAudio": true,
         "outputAudioPath": "output_audio/output.wav",
         "isBenchmarking": true,
-        "isLog": false
+        "isLog": true
     },
 
     "audio": {
         "sampleRate": 44100,
-        "audioLengthLog2": 10,
+        "audioLengthLog2": 11,
         "wavetableSize": 327680
     },
 
     "evolutionary": {
-        "numParents": 1024,
-        "numOffspring": 7168,
-        "numDimensions": 4,
-        "paramMins": [0.0, 0.0, 0.0, 0.0],
-        "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
+        "numParents": 16,
+        "numOffspring": 16,
+        "numDimensions": 6,
+        "paramMins": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "paramMaxs": [3520.0, 8.0, 3520.0, 8.0, 3520.0, 8.0],
         "fitnessThreshold": 0.00001,
-        "numGenerations": 100
+        "numGenerations": 1000
     },
 
     "type": {
-        "implementation": "OpenCL",
+        "implementation": "CPU",
         "OpenCL": {
             "workgroupSize": 32
         },
@@ -36,7 +36,7 @@
 			"workgroupSize": 32
         },
         "input": "params",
-        "params": [1450.0, 3.0, 200.0, 1.0],
+        "params": [3078, 2.0, 3015, 1.5, 3141, 1.0],
         "audio": "input_audio/input.wav"
     }
 }
