@@ -369,7 +369,7 @@ public:
 	{
 		//float params[4] = { aParams[0], aParams[1], aParams[2], aParams[3] };
 		float params[4] = { aParams[0] * paramMaxs[0], aParams[1] * paramMaxs[1], aParams[2] * paramMaxs[2], aParams[3] * paramMaxs[3] };
-		float modIdxMulModFreq = params[0] * params[1];
+		float modulationIndex = params[1];
 		float carrierFreq = params[2];
 		float carrierAmp = params[3];
 
@@ -381,7 +381,7 @@ public:
 		for (int i = 0; i < audioLength; i++)
 		{
 			//Oscillation 1//
-			currentSample = wavetable[(unsigned int)wavetablePosOne] * modIdxMulModFreq +
+			currentSample = wavetable[(unsigned int)wavetablePosOne] * modulationIndex +
 				carrierFreq;
 			wavetablePosOne += wavetableIncrementOne;
 			if (wavetablePosOne >= wavetableSize) {

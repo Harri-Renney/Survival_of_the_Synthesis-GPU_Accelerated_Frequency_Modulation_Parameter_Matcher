@@ -212,17 +212,17 @@ int main(int argc, char* argv[])
 		if (inputType == InputType::Params)
 		{
 			//Simple
-			//const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3] };
-			//obj.synthesiseAudio(params, targetAudio);
+			const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3] };
+			obj.synthesiseAudio(params, targetAudio);
 			//Triple parallel
 			/*const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3],
 			paramInputs[4] / paramMaxs[0], paramInputs[5] / paramMaxs[1], paramInputs[6] / paramMaxs[2], paramInputs[7] / paramMaxs[3] ,
 			paramInputs[8] / paramMaxs[0], paramInputs[9] / paramMaxs[1], paramInputs[10] / paramMaxs[2], paramInputs[11] / paramMaxs[3] };
 			obj.synthesiseAudioTriple(params, targetAudio);*/
 			//Double Series
-			const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3],
-			paramInputs[4] / paramMaxs[4], paramInputs[5] / paramMaxs[5] };
-			obj.synthesiseAudioDoubleSeries(params, targetAudio);
+			/*const std::vector<float> params = { paramInputs[0] / paramMaxs[0], paramInputs[1] / paramMaxs[1], paramInputs[2] / paramMaxs[2], paramInputs[3] / paramMaxs[3],
+			paramInputs[4] / paramMaxs[4], paramInputs[5] / paramMaxs[5] };*/
+			//obj.synthesiseAudioDoubleSeries(params, targetAudio);
 			outputAudioFile("inputGenerated.wav", targetAudio, (targetAudioLength));
 		}
 
@@ -258,7 +258,9 @@ int main(int argc, char* argv[])
 		
 		//Simple
 		//float params[] = { 500.0f / paramMax[0], 8.0f / paramMax[1], 2500.0f / paramMax[2], 1.0f / paramMax[3] };
-		//std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
+		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3] };
+		float* audioBuffer = new float[1 << 14];	//Why need this much memory?
+		obj.synthesiseAudio(bestParamsUnscaled, audioBuffer);
 		//Triple Parallel
 		//std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3],
 		//inputPopulationValues[4], inputPopulationValues[5], inputPopulationValues[6], inputPopulationValues[7] ,
@@ -267,11 +269,11 @@ int main(int argc, char* argv[])
 		//float* audioBuffer = new float[1 << 14];	//Why need this much memory?
 		//obj.synthesiseAudioTriple(bestParamsUnscaled, audioBuffer);
 		//Double Series
-		std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3],
-		inputPopulationValues[4], inputPopulationValues[5] };
-		std::vector<float> bestParamsScaled = es->objective.scaleParams(bestParamsUnscaled);
-		float* audioBuffer = new float[1 << 14];	//Why need this much memory?
-		obj.synthesiseAudioDoubleSeries(bestParamsUnscaled, audioBuffer);
+		//std::vector<float> bestParamsUnscaled = { inputPopulationValues[0], inputPopulationValues[1], inputPopulationValues[2], inputPopulationValues[3],
+		//inputPopulationValues[4], inputPopulationValues[5] };
+		//std::vector<float> bestParamsScaled = es->objective.scaleParams(bestParamsUnscaled);
+		//float* audioBuffer = new float[1 << 14];	//Why need this much memory?
+		//obj.synthesiseAudioDoubleSeries(bestParamsUnscaled, audioBuffer);
 		outputAudioFile(outputAudioPath.c_str(), audioBuffer, (1<<14));
 
 		printf("Overall best parameters found\n Fitness = %f\n", inputPopulationFitness[0]);

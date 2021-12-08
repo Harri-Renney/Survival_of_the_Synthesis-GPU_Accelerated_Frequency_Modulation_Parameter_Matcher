@@ -297,7 +297,8 @@ __kernel void synthesisePopulation(__global float* out_audio_waves,
         params_scaled[i] = param_mins[i] + in_population_values[populationStartIndex+index*NUM_DIMENSIONS+i] * (param_maxs[i]-param_mins[i]);
     }
 
-    float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
+    float modIdxMulModFreq = params_scaled[1];
+	//float modIdxMulModFreq = params_scaled[0] * params_scaled[1];
     float carrierFreq  = params_scaled[2];
     float carrierAmp = params_scaled[3];
 

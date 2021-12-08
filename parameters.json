@@ -15,19 +15,19 @@
     },
 
     "evolutionary": {
-        "numParents": 16,
-        "numOffspring": 16,
-        "numDimensions": 6,
-        "paramMins": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        "paramMaxs": [3520.0, 8.0, 3520.0, 8.0, 3520.0, 8.0],
+        "numParents": 1000,
+        "numOffspring": 1000,
+        "numDimensions": 4,
+        "paramMins": [0.0, 0.0, 0.0, 0.0],
+        "paramMaxs": [3520.0, 8.0, 3520.0, 1.0],
         "fitnessThreshold": 0.00001,
         "numGenerations": 1000
     },
 
     "type": {
-        "implementation": "CPU",
+        "implementation": "OpenCL",
         "OpenCL": {
-            "workgroupSize": 32
+            "workgroupSize": 16
         },
         "Vulkan": {
 			"workgroupSize": 32
@@ -36,7 +36,7 @@
 			"workgroupSize": 32
         },
         "input": "params",
-        "params": [3078, 2.0, 3015, 1.5, 3141, 1.0],
+        "params": [1110.0, 5.0, 620.0, 1.0],
         "audio": "input_audio/input.wav"
     }
 }

@@ -113,8 +113,8 @@ public:
 		workgroupZ(1),
 		workgroupSize(workgroupX*workgroupY*workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
-		//kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
-		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulationDoubleSeries", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
+		//kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulationDoubleSeries", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
 		globalSize_(population.populationLength)
 	{
 		init();
@@ -128,8 +128,8 @@ public:
 		workgroupZ(args.workgroupZ),
 		workgroupSize(args.workgroupX*args.workgroupY*args.workgroupZ),
 		numWorkgroupsPerParent(population.numParents / workgroupSize),
-		//kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
-		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulationDoubleSeries", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
+		kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulation", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
+		//kernelNames_({ "initPopulation", "recombinePopulation", "mutatePopulation", "synthesisePopulationDoubleSeries", "applyWindowPopulation", "openCLFFT", "fitnessPopulation", "sortPopulation", "rotatePopulation" }),
 		globalSize_(population.populationLength),
 		deviceType_(args.deviceType)
 	{
@@ -612,17 +612,17 @@ public:
 	//@ToDo - When using rotation index, need check this actually prints latest best//
 	void printBest()
 	{
-		//uint32_t tempSize = 4 * sizeof(float);
-		//float* tempData = new float[4];
-		//commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationValueBuffer], CL_TRUE, 0, tempSize, tempData);
-		//printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3]);
+		uint32_t tempSize = 4 * sizeof(float);
+		float* tempData = new float[4];
+		commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationValueBuffer], CL_TRUE, 0, tempSize, tempData);
+		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n\n\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3]);
 
-		uint32_t tempSize = 12 * sizeof(float);
+		/*uint32_t tempSize = 12 * sizeof(float);
 		float* tempData = new float[12];
 		commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationValueBuffer], CL_TRUE, 0, tempSize, tempData);
 		printf("Best parameters found:\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n Fc = %f\n I = %f\n Fm = %f\n A = %f\n", tempData[0] * objective.paramMaxs[0], tempData[1] * objective.paramMaxs[1], tempData[2] * objective.paramMaxs[2], tempData[3] * objective.paramMaxs[3],
 			tempData[4] * objective.paramMaxs[0], tempData[5] * objective.paramMaxs[1], tempData[6] * objective.paramMaxs[2], tempData[7] * objective.paramMaxs[3],
-			tempData[8] * objective.paramMaxs[0], tempData[9] * objective.paramMaxs[1], tempData[10] * objective.paramMaxs[2], tempData[11] * objective.paramMaxs[3]);
+			tempData[8] * objective.paramMaxs[0], tempData[9] * objective.paramMaxs[1], tempData[10] * objective.paramMaxs[2], tempData[11] * objective.paramMaxs[3]);*/
 
 		commandQueue_.enqueueReadBuffer(storageBuffers_[inputPopulationFitnessBuffer], CL_TRUE, 0, tempSize, tempData);
 		printf("Best fitness: %f\n\n", tempData[0]);
